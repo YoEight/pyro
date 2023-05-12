@@ -69,6 +69,13 @@ impl<'a> State<'a> {
 pub enum Keyword {
     New,
     Def,
+    If,
+    Then,
+    Else,
+    Run,
+    And,
+    Or,
+    Type,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,7 +97,7 @@ pub struct Token {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenItem{
+pub enum TokenItem {
     /// An end-of-file marker, not a real token
     EOF,
     // Type
@@ -138,8 +145,6 @@ pub enum TokenItem{
     LBracket,
     /// Right bracket `]`
     RBracket,
-    /// `&&`
-    DoubleAmpersand,
     /// Pipe `|`
     Pipe,
     /// Caret `^`
@@ -148,6 +153,12 @@ pub enum TokenItem{
     ExclamationMark,
     /// Question Mark `?`
     QuestionMark,
+    /// `.`
+    Dot,
+    /// `@`
+    At,
+    /// `_`
+    Underscore,
 }
 
 pub struct Tokenizer<'a> {
@@ -167,10 +178,7 @@ impl<'a> Tokenizer<'a> {
 
         let mut pos = state.pos();
         while let Some(item) = self.next_token_item(&mut state)? {
-            tokens.push(Token {
-                item,
-                pos,
-            });
+            tokens.push(Token { item, pos });
 
             pos = state.pos();
         }
@@ -181,7 +189,7 @@ impl<'a> Tokenizer<'a> {
         match chars.peek() {
             None => Ok(Some(TokenItem::EOF)),
             Some(ch) => match ch {
-                ' ' | '\t'  => {
+                ' ' | '\t' => {
                     chars.next();
                     while let Some(' ' | '\t') = chars.peek() {
                         chars.next();
@@ -199,7 +207,33 @@ impl<'a> Tokenizer<'a> {
                     Ok(Some(TokenItem::Newline))
                 }
 
-                // Start of an identifier
+                '!' => self.consume(chars, TokenItem::ExclamationMark),
+                '?' => self.consume(chars, TokenItem::QuestionMark),
+                '.' => self.consume(chars, TokenItem::Dot),
+                '^' => self.consume(chars, TokenItem::Caret),
+                ',' => self.consume(chars, TokenItem::Comma),
+                ':' => self.consume(chars, TokenItem::Colon),
+                '[' => self.consume(chars, TokenItem::LBracket),
+                ']' => self.consume(chars, TokenItem::RBracket),
+                '(' => self.consume(chars, TokenItem::LParen),
+                ')' => self.consume(chars, TokenItem::RParen),
+                '@' => self.consume(chars, TokenItem::At),
+                '_' => self.consume(chars, TokenItem::Underscore),
+                '+' => self.consume(chars, TokenItem::Plus),
+                '-' => self.consume(chars, TokenItem::Minus),
+                '*' => self.consume(chars, TokenItem::Mul),
+                '/' => self.consume(chars, TokenItem::Div),
+                '%' => self.consume(chars, TokenItem::Mod),
+
+                '=' => {
+                    chars.next();
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, TokenItem::DoubleEq);
+                    }
+
+                    Ok(Some(TokenItem::Eq))
+                }
+
                 _ if ch.is_ascii_lowercase() && ch.is_ascii_alphabetic() => {
                     let mut ident = String::new();
 
@@ -213,7 +247,20 @@ impl<'a> Tokenizer<'a> {
                         break;
                     }
 
-                    Ok(Some(TokenItem::Literal(Literal::Id(ident))))
+                    match ident.as_str() {
+                        "true" => Ok(Some(TokenItem::Literal(Literal::Bool(true)))),
+                        "false" => Ok(Some(TokenItem::Literal(Literal::Bool(false)))),
+                        "if" => Ok(Some(TokenItem::Keyword(Keyword::If))),
+                        "then" => Ok(Some(TokenItem::Keyword(Keyword::Then))),
+                        "else" => Ok(Some(TokenItem::Keyword(Keyword::Else))),
+                        "def" => Ok(Some(TokenItem::Keyword(Keyword::Def))),
+                        "run" => Ok(Some(TokenItem::Keyword(Keyword::Run))),
+                        "new" => Ok(Some(TokenItem::Keyword(Keyword::New))),
+                        "and" => Ok(Some(TokenItem::Keyword(Keyword::And))),
+                        "or" => Ok(Some(TokenItem::Keyword(Keyword::Or))),
+                        "type" => Ok(Some(TokenItem::Keyword(Keyword::Or))),
+                        _ => Ok(Some(TokenItem::Literal(Literal::Id(ident)))),
+                    }
                 }
 
                 // Start of a type
@@ -236,11 +283,15 @@ impl<'a> Tokenizer<'a> {
                 _ => {
                     todo!()
                 }
-            }
+            },
         }
     }
 
-    fn consume(&self, chars: &mut State, item: TokenItem) -> Result<Option<TokenItem>, TokenizerError> {
+    fn consume(
+        &self,
+        chars: &mut State,
+        item: TokenItem,
+    ) -> Result<Option<TokenItem>, TokenizerError> {
         chars.next();
         Ok(Some(item))
     }
