@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::fmt;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -6,8 +9,7 @@ use std::str::Chars;
 #[derive(Debug, PartialEq, Eq)]
 pub struct TokenizerError {
     pub message: String,
-    pub line: u64,
-    pub col: u64,
+    pub pos: Pos,
 }
 
 impl fmt::Display for TokenizerError {
@@ -15,7 +17,7 @@ impl fmt::Display for TokenizerError {
         write!(
             f,
             "{} at Line: {}, Column {}",
-            self.message, self.line, self.col
+            self.message, self.pos.line, self.pos.column
         )
     }
 }
@@ -115,7 +117,7 @@ pub enum TokenItem {
     DoubleEq,
     /// Equality operator `=`
     Eq,
-    /// Not Equals operator `<>` (or `!=` in some dialects)
+    /// Not Equals operator `!=`
     Neq,
     /// Less Than operator `<`
     Lt,
@@ -167,7 +169,7 @@ pub struct Tokenizer<'a> {
 
 impl<'a> Tokenizer<'a> {
     /// Tokenize the statement and produce a vector of tokens with location information
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, TokenizerError> {
+    pub fn tokenize(&self) -> Result<Vec<Token>, TokenizerError> {
         let mut state = State {
             peekable: self.query.chars().peekable(),
             line: 1,
@@ -175,19 +177,25 @@ impl<'a> Tokenizer<'a> {
         };
 
         let mut tokens: Vec<Token> = vec![];
-
         let mut pos = state.pos();
+
         while let Some(item) = self.next_token_item(&mut state)? {
             tokens.push(Token { item, pos });
 
             pos = state.pos();
         }
+
+        tokens.push(Token {
+            item: TokenItem::EOF,
+            pos,
+        });
+
         Ok(tokens)
     }
 
     fn next_token_item(&self, chars: &mut State) -> Result<Option<TokenItem>, TokenizerError> {
         match chars.peek() {
-            None => Ok(Some(TokenItem::EOF)),
+            None => Ok(None),
             Some(ch) => match ch {
                 ' ' | '\t' => {
                     chars.next();
@@ -207,7 +215,6 @@ impl<'a> Tokenizer<'a> {
                     Ok(Some(TokenItem::Newline))
                 }
 
-                '!' => self.consume(chars, TokenItem::ExclamationMark),
                 '?' => self.consume(chars, TokenItem::QuestionMark),
                 '.' => self.consume(chars, TokenItem::Dot),
                 '^' => self.consume(chars, TokenItem::Caret),
@@ -224,6 +231,62 @@ impl<'a> Tokenizer<'a> {
                 '*' => self.consume(chars, TokenItem::Mul),
                 '/' => self.consume(chars, TokenItem::Div),
                 '%' => self.consume(chars, TokenItem::Mod),
+                '|' => self.consume(chars, TokenItem::Pipe),
+
+                '!' => {
+                    chars.next();
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, TokenItem::Neq);
+                    }
+
+                    Ok(Some(TokenItem::ExclamationMark))
+                }
+
+                '>' => {
+                    chars.next();
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, TokenItem::GtEq);
+                    }
+
+                    Ok(Some(TokenItem::Gt))
+                }
+
+                '<' => {
+                    chars.next();
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, TokenItem::LtEq);
+                    }
+
+                    Ok(Some(TokenItem::Lt))
+                }
+
+                '"' => {
+                    let mut string = String::new();
+
+                    chars.next();
+
+                    while let Some(ch) = chars.peek() {
+                        if *ch == '"' {
+                            return self
+                                .consume(chars, TokenItem::Literal(Literal::String(string)));
+                        }
+
+                        if *ch == '\n' {
+                            return Err(TokenizerError {
+                                message: "String literal is malformed".to_string(),
+                                pos: chars.pos(),
+                            });
+                        }
+
+                        string.push(*ch);
+                        chars.next();
+                    }
+
+                    Err(TokenizerError {
+                        message: "Incomplete string literal".to_string(),
+                        pos: chars.pos(),
+                    })
+                }
 
                 '=' => {
                     chars.next();
@@ -238,13 +301,15 @@ impl<'a> Tokenizer<'a> {
                     let mut ident = String::new();
 
                     ident.push(*ch);
+                    chars.next();
+
                     while let Some(ch) = chars.peek() {
-                        if ch.is_ascii_alphanumeric() {
-                            ident.push(*ch);
-                            chars.next();
+                        if !ch.is_ascii_alphanumeric() {
+                            break;
                         }
 
-                        break;
+                        ident.push(*ch);
+                        chars.next();
                     }
 
                     match ident.as_str() {
@@ -268,21 +333,23 @@ impl<'a> Tokenizer<'a> {
                     let mut ident = String::new();
 
                     ident.push(*ch);
+                    chars.next();
                     while let Some(ch) = chars.peek() {
-                        if ch.is_ascii_alphanumeric() {
-                            ident.push(*ch);
-                            chars.next();
+                        if !ch.is_ascii_alphanumeric() {
+                            break;
                         }
 
-                        break;
+                        ident.push(*ch);
+                        chars.next();
                     }
 
                     Ok(Some(TokenItem::Type(ident)))
                 }
 
-                _ => {
-                    todo!()
-                }
+                _ => Err(TokenizerError {
+                    message: format!("Unexpected symbol '{}'", ch),
+                    pos: chars.pos(),
+                }),
             },
         }
     }
