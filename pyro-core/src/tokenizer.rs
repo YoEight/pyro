@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::literal::Literal;
 use std::fmt;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -78,18 +79,6 @@ pub enum Keyword {
     And,
     Or,
     Type,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Literal {
-    // Identifier
-    Id(String),
-    /// An unsigned numeric literal
-    Number(String, bool),
-    /// Double quoted string: i.e: "string"
-    String(String),
-    Char(char),
-    Bool(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
