@@ -79,6 +79,10 @@ pub struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
+    pub fn new(query: &'a str) -> Self {
+        Self { query }
+    }
+
     /// Tokenize the statement and produce a vector of tokens with location information
     pub fn tokenize(&self) -> Result<Vec<Token>, TokenizerError> {
         let mut state = State {

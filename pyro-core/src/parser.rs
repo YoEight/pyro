@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use crate::ast::{Abs, Proc, Program, Tag, Val};
 use crate::sym::{Keyword, Sym};
 use crate::tokenizer::{Pos, Token};
@@ -17,6 +20,13 @@ impl<'a> ParserState<'a> {
     pub fn shift(&mut self) -> &'a Token {
         self.peekable.next().unwrap()
     }
+
+    pub fn skip_whitespace(&mut self) {
+        if let Sym::Whitespace = &self.look_ahead().item {
+            self.shift();
+            return;
+        }
+    }
 }
 
 pub struct Parser<'a> {
@@ -24,6 +34,10 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    pub fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens }
+    }
+
     pub fn parse(&self) -> Program<Pos> {
         let mut state = ParserState {
             peekable: self.tokens.iter().peekable(),
@@ -34,6 +48,8 @@ impl<'a> Parser<'a> {
         if start.item != Sym::Keyword(Keyword::Run) {
             panic!("{:?}: must start with run", start.pos);
         }
+
+        state.skip_whitespace();
 
         let proc = self.parse_proc(&mut state);
 
@@ -53,11 +69,14 @@ impl<'a> Parser<'a> {
                 let lhs = state.shift();
                 let lhs = self.parse_value(state, lhs);
 
+                state.skip_whitespace();
                 token = state.look_ahead();
 
                 match token.item {
                     Sym::ExclamationMark => {
                         state.shift();
+                        state.skip_whitespace();
+
                         let rhs = state.shift();
                         let rhs = self.parse_value(state, rhs);
 
@@ -66,6 +85,8 @@ impl<'a> Parser<'a> {
 
                     Sym::QuestionMark => {
                         state.shift();
+                        state.skip_whitespace();
+
                         let rhs = state.shift();
                         let rhs = self.parse_abs(state, rhs);
 
@@ -95,7 +116,7 @@ impl<'a> Parser<'a> {
 
             Sym::Id(head) => self.parse_path(state, token.pos, head.clone()),
 
-            _ => panic!(),
+            _ => panic!("{:?} Expecting parsing a value", token.pos),
         }
     }
 
