@@ -83,8 +83,8 @@ pub enum Keyword {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
-    item: TokenItem,
-    pos: Pos,
+    pub item: TokenItem,
+    pub pos: Pos,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
