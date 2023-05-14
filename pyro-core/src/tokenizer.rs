@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::literal::Literal;
+use crate::sym::{Keyword, Literal, Sym};
 use std::fmt;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -68,88 +68,10 @@ impl<'a> State<'a> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Keyword {
-    New,
-    Def,
-    If,
-    Then,
-    Else,
-    Run,
-    And,
-    Or,
-    Type,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
-    pub item: TokenItem,
+    pub item: Sym,
     pub pos: Pos,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenItem {
-    /// An end-of-file marker, not a real token
-    EOF,
-    // Type
-    Type(String),
-    Literal(Literal),
-    /// A keyword
-    Keyword(Keyword),
-    /// Comma
-    Comma,
-    /// Whitespace (space, tab, etc)
-    Whitespace,
-    /// `\n`
-    Newline,
-    /// Double equals sign `==`
-    DoubleEq,
-    /// Equality operator `=`
-    Eq,
-    /// Not Equals operator `!=`
-    Neq,
-    /// Less Than operator `<`
-    Lt,
-    /// Greater Than operator `>`
-    Gt,
-    /// Less Than Or Equals operator `<=`
-    LtEq,
-    /// Greater Than Or Equals operator `>=`
-    GtEq,
-    /// Plus operator `+`
-    Plus,
-    /// Minus operator `-`
-    Minus,
-    /// Multiplication operator `*`
-    Mul,
-    /// Division operator `/`
-    Div,
-    /// Modulo Operator `%`
-    Mod,
-    /// Left parenthesis `(`
-    LParen,
-    /// Right parenthesis `)`
-    RParen,
-    /// Colon `:`
-    Colon,
-    /// Left bracket `[`
-    LBracket,
-    /// Right bracket `]`
-    RBracket,
-    /// Pipe `|`
-    Pipe,
-    /// Caret `^`
-    Caret,
-    /// Exclamation Mark `!`
-    ExclamationMark,
-    /// Question Mark `?`
-    QuestionMark,
-    /// `.`
-    Dot,
-    /// `@`
-    At,
-    /// `_`
-    Underscore,
 }
 
 pub struct Tokenizer<'a> {
@@ -175,14 +97,14 @@ impl<'a> Tokenizer<'a> {
         }
 
         tokens.push(Token {
-            item: TokenItem::EOF,
+            item: Sym::EOF,
             pos,
         });
 
         Ok(tokens)
     }
 
-    fn next_token_item(&self, chars: &mut State) -> Result<Option<TokenItem>, TokenizerError> {
+    fn next_token_item(&self, chars: &mut State) -> Result<Option<Sym>, TokenizerError> {
         match chars.peek() {
             None => Ok(None),
             Some(ch) => match ch {
@@ -192,7 +114,7 @@ impl<'a> Tokenizer<'a> {
                         chars.next();
                     }
 
-                    Ok(Some(TokenItem::Whitespace))
+                    Ok(Some(Sym::Whitespace))
                 }
 
                 '\n' => {
@@ -201,52 +123,52 @@ impl<'a> Tokenizer<'a> {
                         chars.next();
                     }
 
-                    Ok(Some(TokenItem::Newline))
+                    Ok(Some(Sym::Newline))
                 }
 
-                '?' => self.consume(chars, TokenItem::QuestionMark),
-                '.' => self.consume(chars, TokenItem::Dot),
-                '^' => self.consume(chars, TokenItem::Caret),
-                ',' => self.consume(chars, TokenItem::Comma),
-                ':' => self.consume(chars, TokenItem::Colon),
-                '[' => self.consume(chars, TokenItem::LBracket),
-                ']' => self.consume(chars, TokenItem::RBracket),
-                '(' => self.consume(chars, TokenItem::LParen),
-                ')' => self.consume(chars, TokenItem::RParen),
-                '@' => self.consume(chars, TokenItem::At),
-                '_' => self.consume(chars, TokenItem::Underscore),
-                '+' => self.consume(chars, TokenItem::Plus),
-                '-' => self.consume(chars, TokenItem::Minus),
-                '*' => self.consume(chars, TokenItem::Mul),
-                '/' => self.consume(chars, TokenItem::Div),
-                '%' => self.consume(chars, TokenItem::Mod),
-                '|' => self.consume(chars, TokenItem::Pipe),
+                '?' => self.consume(chars, Sym::QuestionMark),
+                '.' => self.consume(chars, Sym::Dot),
+                '^' => self.consume(chars, Sym::Caret),
+                ',' => self.consume(chars, Sym::Comma),
+                ':' => self.consume(chars, Sym::Colon),
+                '[' => self.consume(chars, Sym::LBracket),
+                ']' => self.consume(chars, Sym::RBracket),
+                '(' => self.consume(chars, Sym::LParen),
+                ')' => self.consume(chars, Sym::RParen),
+                '@' => self.consume(chars, Sym::At),
+                '_' => self.consume(chars, Sym::Underscore),
+                '+' => self.consume(chars, Sym::Plus),
+                '-' => self.consume(chars, Sym::Minus),
+                '*' => self.consume(chars, Sym::Mul),
+                '/' => self.consume(chars, Sym::Div),
+                '%' => self.consume(chars, Sym::Mod),
+                '|' => self.consume(chars, Sym::Pipe),
 
                 '!' => {
                     chars.next();
                     if let Some('=') = chars.peek() {
-                        return self.consume(chars, TokenItem::Neq);
+                        return self.consume(chars, Sym::Neq);
                     }
 
-                    Ok(Some(TokenItem::ExclamationMark))
+                    Ok(Some(Sym::ExclamationMark))
                 }
 
                 '>' => {
                     chars.next();
                     if let Some('=') = chars.peek() {
-                        return self.consume(chars, TokenItem::GtEq);
+                        return self.consume(chars, Sym::GtEq);
                     }
 
-                    Ok(Some(TokenItem::Gt))
+                    Ok(Some(Sym::Gt))
                 }
 
                 '<' => {
                     chars.next();
                     if let Some('=') = chars.peek() {
-                        return self.consume(chars, TokenItem::LtEq);
+                        return self.consume(chars, Sym::LtEq);
                     }
 
-                    Ok(Some(TokenItem::Lt))
+                    Ok(Some(Sym::Lt))
                 }
 
                 '"' => {
@@ -256,8 +178,7 @@ impl<'a> Tokenizer<'a> {
 
                     while let Some(ch) = chars.peek() {
                         if *ch == '"' {
-                            return self
-                                .consume(chars, TokenItem::Literal(Literal::String(string)));
+                            return self.consume(chars, Sym::Literal(Literal::String(string)));
                         }
 
                         if *ch == '\n' {
@@ -280,10 +201,10 @@ impl<'a> Tokenizer<'a> {
                 '=' => {
                     chars.next();
                     if let Some('=') = chars.peek() {
-                        return self.consume(chars, TokenItem::DoubleEq);
+                        return self.consume(chars, Sym::DoubleEq);
                     }
 
-                    Ok(Some(TokenItem::Eq))
+                    Ok(Some(Sym::Eq))
                 }
 
                 _ if ch.is_ascii_lowercase() && ch.is_ascii_alphabetic() => {
@@ -302,18 +223,18 @@ impl<'a> Tokenizer<'a> {
                     }
 
                     match ident.as_str() {
-                        "true" => Ok(Some(TokenItem::Literal(Literal::Bool(true)))),
-                        "false" => Ok(Some(TokenItem::Literal(Literal::Bool(false)))),
-                        "if" => Ok(Some(TokenItem::Keyword(Keyword::If))),
-                        "then" => Ok(Some(TokenItem::Keyword(Keyword::Then))),
-                        "else" => Ok(Some(TokenItem::Keyword(Keyword::Else))),
-                        "def" => Ok(Some(TokenItem::Keyword(Keyword::Def))),
-                        "run" => Ok(Some(TokenItem::Keyword(Keyword::Run))),
-                        "new" => Ok(Some(TokenItem::Keyword(Keyword::New))),
-                        "and" => Ok(Some(TokenItem::Keyword(Keyword::And))),
-                        "or" => Ok(Some(TokenItem::Keyword(Keyword::Or))),
-                        "type" => Ok(Some(TokenItem::Keyword(Keyword::Or))),
-                        _ => Ok(Some(TokenItem::Literal(Literal::Id(ident)))),
+                        "true" => Ok(Some(Sym::Literal(Literal::Bool(true)))),
+                        "false" => Ok(Some(Sym::Literal(Literal::Bool(false)))),
+                        "if" => Ok(Some(Sym::Keyword(Keyword::If))),
+                        "then" => Ok(Some(Sym::Keyword(Keyword::Then))),
+                        "else" => Ok(Some(Sym::Keyword(Keyword::Else))),
+                        "def" => Ok(Some(Sym::Keyword(Keyword::Def))),
+                        "run" => Ok(Some(Sym::Keyword(Keyword::Run))),
+                        "new" => Ok(Some(Sym::Keyword(Keyword::New))),
+                        "and" => Ok(Some(Sym::Keyword(Keyword::And))),
+                        "or" => Ok(Some(Sym::Keyword(Keyword::Or))),
+                        "type" => Ok(Some(Sym::Keyword(Keyword::Or))),
+                        _ => Ok(Some(Sym::Id(ident))),
                     }
                 }
 
@@ -332,7 +253,7 @@ impl<'a> Tokenizer<'a> {
                         chars.next();
                     }
 
-                    Ok(Some(TokenItem::Type(ident)))
+                    Ok(Some(Sym::Type(ident)))
                 }
 
                 _ => Err(TokenizerError {
@@ -343,11 +264,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn consume(
-        &self,
-        chars: &mut State,
-        item: TokenItem,
-    ) -> Result<Option<TokenItem>, TokenizerError> {
+    fn consume(&self, chars: &mut State, item: Sym) -> Result<Option<Sym>, TokenizerError> {
         chars.next();
         Ok(Some(item))
     }
