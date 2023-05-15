@@ -74,6 +74,12 @@ pub struct Token {
     pub pos: Pos,
 }
 
+impl Token {
+    pub fn item(&self) -> &Sym {
+        &self.item
+    }
+}
+
 pub struct Tokenizer<'a> {
     query: &'a str,
 }

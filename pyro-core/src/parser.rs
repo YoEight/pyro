@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{Abs, Proc, Program, Tag, Val};
+use crate::ast::{Abs, Pat, Proc, Program, Tag, Type, Val, Var};
 use crate::sym::{Keyword, Sym};
 use crate::tokenizer::{Pos, Token};
 use std::collections::VecDeque;
@@ -13,7 +13,7 @@ pub struct ParserState<'a> {
 }
 
 impl<'a> ParserState<'a> {
-    pub fn look_ahead(&mut self) -> &Token {
+    pub fn look_ahead(&mut self) -> &'a Token {
         self.peekable.peek().unwrap()
     }
 
@@ -87,8 +87,7 @@ impl<'a> Parser<'a> {
                         state.shift();
                         state.skip_whitespace();
 
-                        let rhs = state.shift();
-                        let rhs = self.parse_abs(state, rhs);
+                        let rhs = self.parse_abs(state);
 
                         Proc::Input(lhs, rhs)
                     }
@@ -147,8 +146,94 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_abs(&self, state: &mut ParserState, token: &Token) -> Tag<Abs, Pos> {
-        todo!()
+    fn parse_abs(&self, state: &mut ParserState) -> Tag<Abs<Pos>, Pos> {
+        let mut token = state.look_ahead();
+
+        match token.item() {
+            Sym::Id(_) => {
+                let var = self.parse_variable(state);
+                let pat = Pat::Var(var);
+
+                state.skip_whitespace();
+                let sep = state.shift();
+
+                if sep.item() != &Sym::Eq {
+                    panic!("{:?}: Expecting '='", sep.pos);
+                }
+
+                state.skip_whitespace();
+                let proc = self.parse_proc(state);
+
+                Tag {
+                    item: Abs {
+                        pattern: pat,
+                        proc: Box::new(proc),
+                    },
+                    tag: token.pos,
+                }
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn parse_variable(&self, state: &mut ParserState) -> Var {
+        let mut token = state.shift();
+        match &token.item {
+            Sym::Id(name) => {
+                state.skip_whitespace();
+                let r#type = self.parse_type(state);
+
+                Var {
+                    id: name.clone(),
+                    r#type,
+                }
+            }
+
+            _ => panic!("{:?}: Expecting an identifier", token.pos),
+        }
+    }
+
+    fn parse_type(&self, state: &mut ParserState) -> Type {
+        let mut token = state.look_ahead();
+
+        match &token.item {
+            Sym::Colon => {
+                state.shift();
+                state.skip_whitespace();
+
+                token = state.look_ahead();
+                let is_channel = if let Sym::Caret = token.item() {
+                    state.shift();
+                    true
+                } else {
+                    false
+                };
+
+                token = state.look_ahead();
+                match token.item() {
+                    Sym::Type(name) => {
+                        if is_channel {
+                            Type::Channel(name.clone())
+                        } else {
+                            Type::Name(name.clone())
+                        }
+                    }
+
+                    Sym::LBracket => {
+                        state.shift();
+                        self.parse_record_type(state)
+                    }
+
+                    _ => panic!("{:?}: Expected a type", token.pos),
+                }
+            }
+
+            _ => Type::Anonymous,
+        }
+    }
+
+    fn parse_record_type(&self, state: &mut ParserState) -> Type {
+        unimplemented!();
     }
 }
 

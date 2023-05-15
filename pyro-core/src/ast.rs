@@ -15,7 +15,7 @@ pub struct Tag<I, A> {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Proc<A> {
     Output(Tag<Val, A>, Tag<Val, A>),
-    Input(Tag<Val, A>, Tag<Abs, A>),
+    Input(Tag<Val, A>, Tag<Abs<A>, A>),
     Null, // ()
     Parallel(Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
     Decl(Tag<Box<Proc<A>>, A>),
@@ -23,10 +23,31 @@ pub enum Proc<A> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum Abs {}
+pub struct Abs<A> {
+    pub pattern: Pat,
+    pub proc: Box<Proc<A>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Pat {
+    Var(Var),
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Val {
     Literal(Literal),
     Path(VecDeque<String>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Var {
+    pub id: String,
+    pub r#type: Type,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Type {
+    Name(String),
+    Channel(String),
+    Anonymous,
 }
