@@ -17,7 +17,7 @@ pub enum Proc<A> {
     Output(Tag<Val, A>, Tag<Val, A>),
     Input(Tag<Val, A>, Tag<Abs<A>, A>),
     Null, // ()
-    Parallel(Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
+    Parallel(VecDeque<Proc<A>>),
     Decl(Tag<Box<Proc<A>>, A>),
     Cond(Tag<Val, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
 }

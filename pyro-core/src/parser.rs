@@ -27,6 +27,10 @@ impl<'a> ParserState<'a> {
             return;
         }
     }
+
+    pub fn pos(&mut self) -> Pos {
+        self.look_ahead().pos
+    }
 }
 
 pub struct Parser<'a> {
@@ -43,7 +47,7 @@ impl<'a> Parser<'a> {
             peekable: self.tokens.iter().peekable(),
         };
 
-        let mut start = state.shift();
+        let start = state.shift();
 
         if start.item != Sym::Keyword(Keyword::Run) {
             panic!("{:?}: must start with run", start.pos);
@@ -94,16 +98,25 @@ impl<'a> Parser<'a> {
                     _ => panic!(),
                 }
             }
+
+            Sym::LParen => {
+                state.shift();
+                state.skip_whitespace();
+
+                let token = state.look_ahead();
+                if token.item() == &Sym::RParen {
+                    state.shift();
+
+                    Proc::Null
+                } else if start_like_decl(token) {
+                    self.parse_local_decl(state)
+                } else {
+                    self.parse_parallel_composition(state)
+                }
+            }
+
             _ => unimplemented!(),
         }
-    }
-
-    fn parse_output(&self, state: &mut ParserState, lhs: &Token) -> Proc<Pos> {
-        todo!()
-    }
-
-    fn parse_input(&self, state: &mut ParserState, lhs: &Token) -> Proc<Pos> {
-        todo!()
     }
 
     fn parse_value(&self, state: &mut ParserState, token: &Token) -> Tag<Val, Pos> {
@@ -147,7 +160,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_abs(&self, state: &mut ParserState) -> Tag<Abs<Pos>, Pos> {
-        let mut token = state.look_ahead();
+        let token = state.look_ahead();
 
         match token.item() {
             Sym::Id(_) => {
@@ -177,7 +190,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_variable(&self, state: &mut ParserState) -> Var {
-        let mut token = state.shift();
+        let token = state.shift();
         match &token.item {
             Sym::Id(name) => {
                 state.skip_whitespace();
@@ -235,6 +248,44 @@ impl<'a> Parser<'a> {
     fn parse_record_type(&self, state: &mut ParserState) -> Type {
         unimplemented!();
     }
+
+    fn parse_local_decl(&self, state: &mut ParserState) -> Proc<Pos> {
+        todo!()
+    }
+
+    fn parse_parallel_composition(&self, state: &mut ParserState) -> Proc<Pos> {
+        let mut processes = VecDeque::new();
+
+        processes.push_back(self.parse_proc(state));
+
+        state.skip_whitespace();
+        let mut first_time = true;
+        let mut token = state.look_ahead();
+
+        loop {
+            match token.item {
+                Sym::RParen if !first_time => {
+                    state.shift();
+                    break;
+                }
+
+                Sym::Pipe => {
+                    state.shift();
+                    state.skip_whitespace();
+                    processes.push_back(self.parse_proc(state));
+                    state.skip_whitespace();
+                    first_time = false;
+                    token = state.look_ahead();
+                }
+
+                _ => {
+                    panic!("{:?}: Expecting a '|' to separate processes", token.pos);
+                }
+            }
+        }
+
+        Proc::Parallel(processes)
+    }
 }
 
 fn start_like_val(token: &Token) -> bool {
@@ -250,4 +301,13 @@ fn start_like_path(token: &Token) -> bool {
     }
 
     false
+}
+
+fn start_like_decl(token: &Token) -> bool {
+    match token.item() {
+        Sym::Keyword(word) => {
+            word == &Keyword::New || word == &Keyword::Def || word == &Keyword::Type
+        }
+        _ => false,
+    }
 }
