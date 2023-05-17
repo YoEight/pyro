@@ -37,6 +37,7 @@ pub enum Pat {
 pub enum Val {
     Literal(Literal),
     Path(VecDeque<String>),
+    Record(Record<Val>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,4 +51,43 @@ pub enum Type {
     Name(String),
     Channel(String),
     Anonymous,
+    Record(Record<Type>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Record<A> {
+    pub props: VecDeque<Prop<A>>,
+}
+
+impl<A> Record<A> {
+    pub fn map<F, B>(self, fun: F) -> Record<B>
+    where
+        F: Fn(A) -> B,
+    {
+        let props = self
+            .props
+            .into_iter()
+            .map(move |p| p.map(&fun))
+            .collect::<VecDeque<_>>();
+
+        Record { props }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Prop<A> {
+    pub label: Option<String>,
+    pub val: A,
+}
+
+impl<A> Prop<A> {
+    pub fn map<F, B>(self, fun: F) -> Prop<B>
+    where
+        F: FnOnce(A) -> B,
+    {
+        Prop {
+            val: fun(self.val),
+            label: self.label,
+        }
+    }
 }

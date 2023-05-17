@@ -1,5 +1,6 @@
-use crate::ast::{Abs, Pat, Proc, Program, Tag, Type, Val, Var};
-use crate::parser::Parser;
+use crate::ast::{Abs, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::parser::{Parser, ParserState};
+use crate::sym::{Literal, Sym};
 use crate::tokenizer::{Pos, Tokenizer};
 use pretty_assertions::assert_eq;
 
@@ -9,7 +10,7 @@ fn test_parse_output() {
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
     let parser = Parser::new(tokens.as_slice());
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
 
     let expected = Program {
         proc: Tag {
@@ -36,7 +37,7 @@ fn test_parse_abs_with_input() {
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
     let parser = Parser::new(tokens.as_slice());
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
 
     let expected = Program {
         proc: Tag {
@@ -84,7 +85,7 @@ fn test_parse_parallel() {
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
     let parser = Parser::new(tokens.as_slice());
-    let ast = parser.parse();
+    let ast = parser.parse().unwrap();
 
     let expected = Program {
         proc: Tag {
@@ -167,4 +168,62 @@ fn test_parse_parallel() {
     };
 
     assert_eq!(expected, ast);
+}
+
+#[test]
+fn test_parse_record_type() {
+    let query = "[a=Foo Baz]";
+    let tokenizer = Tokenizer::new(query);
+    let tokens = tokenizer.tokenize().unwrap();
+    let parser = Parser::new(tokens.as_slice());
+    let mut state = ParserState::new(tokens.as_slice());
+    let ast = parser.parse_record_type(&mut state).unwrap();
+
+    let expected = Type::Record(Record {
+        props: vec![
+            Prop {
+                label: Some("a".to_string()),
+                val: Type::Name("Foo".to_string()),
+            },
+            Prop {
+                label: None,
+                val: Type::Name("Baz".to_string()),
+            },
+        ]
+        .into(),
+    });
+
+    assert_eq!(expected, ast);
+    assert_eq!(state.look_ahead().item(), &Sym::EOF);
+}
+
+#[test]
+fn test_parse_record_value() {
+    let query = "[a=b true c]";
+    let tokenizer = Tokenizer::new(query);
+    let tokens = tokenizer.tokenize().unwrap();
+    let parser = Parser::new(tokens.as_slice());
+    let mut state = ParserState::new(tokens.as_slice());
+    let ast = parser.parse_record_value(&mut state).unwrap().item;
+
+    let expected = Val::Record(Record {
+        props: vec![
+            Prop {
+                label: Some("a".to_string()),
+                val: Val::Path(vec!["b".to_string()].into()),
+            },
+            Prop {
+                label: None,
+                val: Val::Literal(Literal::Bool(true)),
+            },
+            Prop {
+                label: None,
+                val: Val::Path(vec!["c".to_string()].into()),
+            },
+        ]
+        .into(),
+    });
+
+    assert_eq!(expected, ast);
+    assert_eq!(state.look_ahead().item(), &Sym::EOF);
 }
