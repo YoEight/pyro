@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{Abs, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::ast::{Abs, Decl, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
 use crate::sym::{Keyword, Sym};
 use crate::tokenizer::{Pos, Token};
 use std::collections::VecDeque;
@@ -44,6 +44,13 @@ impl<'a> ParserState<'a> {
 
     pub fn skip_whitespace(&mut self) {
         if let Sym::Whitespace = &self.look_ahead().item {
+            self.shift();
+            return;
+        }
+    }
+
+    pub fn skip_newline(&mut self) {
+        if let Sym::Newline = &self.look_ahead().item {
             self.shift();
             return;
         }
@@ -136,7 +143,7 @@ impl<'a> Parser<'a> {
 
                     Ok(Proc::Null)
                 } else if start_like_decl(token) {
-                    Ok(self.parse_local_decl(state))
+                    self.parse_local_decl(state)
                 } else {
                     self.parse_parallel_composition(state)
                 }
@@ -270,37 +277,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_type(&self, state: &mut ParserState) -> Result<Type> {
-        let mut token = state.look_ahead();
-
-        let is_channel = if let Sym::Caret = token.item() {
-            state.shift();
-            true
-        } else {
-            false
-        };
-
-        token = state.look_ahead();
-        match token.item() {
-            Sym::Type(name) => {
-                state.shift();
-
-                if is_channel {
-                    Ok(Type::Channel(name.clone()))
-                } else {
-                    Ok(Type::Name(name.clone()))
-                }
-            }
-
-            Sym::LBracket => self.parse_record_type(state),
-
-            _ => Err(Error {
-                pos: token.pos,
-                message: format!("expected a type but got {}", token.item),
-            }),
-        }
-    }
-
     pub fn parse_record_type(&self, state: &mut ParserState) -> Result<Type> {
         let mut token = state.shift();
 
@@ -336,8 +312,45 @@ impl<'a> Parser<'a> {
         Ok(Type::Record(Record { props }))
     }
 
-    fn parse_local_decl(&self, state: &mut ParserState) -> Proc<Pos> {
-        todo!()
+    fn parse_local_decl(&self, state: &mut ParserState) -> Result<Proc<Pos>> {
+        let decl = self.parse_decl(state)?;
+
+        state.skip_whitespace();
+        state.skip_newline();
+
+        let pos = state.pos();
+        let proc = self.parse_proc(state)?;
+
+        Ok(Proc::Decl(
+            decl,
+            Tag {
+                item: Box::new(proc),
+                tag: pos,
+            },
+        ))
+    }
+
+    fn parse_decl(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
+        let token = state.look_ahead();
+
+        state.skip_whitespace();
+
+        match token.item() {
+            Sym::Keyword(key) => match key {
+                Keyword::New => self.parse_new_channel(state),
+                Keyword::Def => self.parse_def(state),
+                Keyword::Type => self.parse_type_decl(state),
+                _ => Err(Error {
+                    pos: token.pos,
+                    message: format!("Unexpected keyword '{}'", key),
+                }),
+            },
+
+            _ => Err(Error {
+                pos: token.pos,
+                message: format!("Expecting a declaration but got '{}' instead", token.item),
+            }),
+        }
     }
 
     fn parse_parallel_composition(&self, state: &mut ParserState) -> Result<Proc<Pos>> {
@@ -460,6 +473,155 @@ impl<'a> Parser<'a> {
             item: Val::Record(Record { props }),
             tag: pos,
         })
+    }
+
+    fn parse_new_channel(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
+        let pos = state.pos();
+        let key = self.parse_keyword(state)?;
+
+        if key != Keyword::New {
+            return Err(Error {
+                pos,
+                message: format!("Expected 'new' but got '{}' instead", key),
+            });
+        }
+
+        let id = self.parse_id(state)?;
+        state.skip_whitespace();
+        self.parse_colon(state)?;
+        let r#type = self.parse_type(state)?;
+
+        Ok(Decl::Channel(id, r#type))
+    }
+
+    fn parse_id(&self, state: &mut ParserState) -> Result<String> {
+        let token = state.shift();
+
+        if let Sym::Id(s) = token.item() {
+            return Ok(s.clone());
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!("Expected an identifier but got '{:?} instead", token.item()),
+        })
+    }
+
+    fn parse_type(&self, state: &mut ParserState) -> Result<Type> {
+        enum Constr {
+            InOut,
+        }
+
+        let mut constrs = Vec::new();
+        let mut r#type = loop {
+            let token = state.look_ahead();
+
+            match token.item() {
+                Sym::Type(s) => {
+                    state.shift();
+                    break Type::Name(s.clone());
+                }
+
+                Sym::Caret => {
+                    state.shift();
+                    constrs.push(Constr::InOut);
+                }
+
+                Sym::LBracket => {
+                    break self.parse_record_type(state)?;
+                }
+
+                _ => {
+                    return Err(Error {
+                        pos: token.pos,
+                        message: format!(
+                            "Expected an identifier but got '{:?} instead",
+                            token.item()
+                        ),
+                    })
+                }
+            }
+        };
+
+        while let Some(constr) = constrs.pop() {
+            match constr {
+                Constr::InOut => r#type = Type::Channel(Box::new(r#type)),
+            }
+        }
+
+        return Ok(r#type);
+    }
+
+    fn parse_colon(&self, state: &mut ParserState) -> Result<()> {
+        let token = state.shift();
+
+        if let Sym::Colon = token.item() {
+            return Ok(());
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!("Expected ':' but got '{}' instead", token.item()),
+        })
+    }
+
+    fn parse_eq(&self, state: &mut ParserState) -> Result<()> {
+        let token = state.shift();
+
+        if let Sym::Eq = token.item() {
+            return Ok(());
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!("Expected '=' but got '{}' instead", token.item()),
+        })
+    }
+
+    fn parse_keyword(&self, state: &mut ParserState) -> Result<Keyword> {
+        let token = state.shift();
+
+        if let Sym::Keyword(key) = token.item() {
+            return Ok(*key);
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!("Expected a keyword but got '{}' instead", token.item()),
+        })
+    }
+
+    fn parse_def(&self, _state: &mut ParserState) -> Result<Decl<Pos>> {
+        todo!()
+    }
+
+    fn expect_keyword(&self, state: &mut ParserState, expected: Keyword) -> Result<()> {
+        let pos = state.pos();
+        let key = self.parse_keyword(state)?;
+
+        if expected != key {
+            return Err(Error {
+                pos,
+                message: format!("Expected '{}' but got '{}' instead", expected, key),
+            });
+        }
+
+        Ok(())
+    }
+
+    fn parse_type_decl(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
+        self.expect_keyword(state, Keyword::Type)?;
+        state.skip_whitespace();
+
+        let id = self.parse_id(state)?;
+        state.skip_whitespace();
+
+        self.parse_eq(state)?;
+        state.skip_whitespace();
+
+        let r#type = self.parse_type(state)?;
+
+        Ok(Decl::Type(id, r#type))
     }
 }
 

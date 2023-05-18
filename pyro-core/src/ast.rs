@@ -18,7 +18,7 @@ pub enum Proc<A> {
     Input(Tag<Val, A>, Tag<Abs<A>, A>),
     Null, // ()
     Parallel(VecDeque<Proc<A>>),
-    Decl(Tag<Box<Proc<A>>, A>),
+    Decl(Decl<A>, Tag<Box<Proc<A>>, A>),
     Cond(Tag<Val, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
 }
 
@@ -49,7 +49,7 @@ pub struct Var {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Type {
     Name(String),
-    Channel(String),
+    Channel(Box<Type>),
     Anonymous,
     Record(Record<Type>),
 }
@@ -90,4 +90,17 @@ impl<A> Prop<A> {
             label: self.label,
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Def<A> {
+    pub name: String,
+    pub abs: Abs<A>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Decl<A> {
+    Channel(String, Type),
+    Def(VecDeque<Def<A>>),
+    Type(String, Type),
 }
