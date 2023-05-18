@@ -1,4 +1,4 @@
-use crate::ast::{Abs, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::ast::{Abs, Decl, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
 use crate::parser::{Parser, ParserState};
 use crate::sym::{Literal, Sym};
 use crate::tokenizer::{Pos, Tokenizer};
@@ -223,6 +223,57 @@ fn test_parse_record_value() {
         ]
         .into(),
     });
+
+    assert_eq!(expected, ast);
+    assert_eq!(state.look_ahead().item(), &Sym::EOF);
+}
+
+#[test]
+fn test_parse_new_channel() {
+    let query = "new stream : Bool";
+    let tokenizer = Tokenizer::new(query);
+    let tokens = tokenizer.tokenize().unwrap();
+    let parser = Parser::new(tokens.as_slice());
+    let mut state = ParserState::new(tokens.as_slice());
+    let ast = parser.parse_decl(&mut state).unwrap();
+
+    let expected = Decl::Channel("stream".to_string(), Type::Name("Bool".to_string()));
+
+    assert_eq!(expected, ast);
+    assert_eq!(state.look_ahead().item(), &Sym::EOF);
+}
+
+#[test]
+fn test_parse_type_decl() {
+    let query = "type Foobar = ^[too=String ^[Int]]";
+    let tokenizer = Tokenizer::new(query);
+    let tokens = tokenizer.tokenize().unwrap();
+    let parser = Parser::new(tokens.as_slice());
+    let mut state = ParserState::new(tokens.as_slice());
+    let ast = parser.parse_type_decl(&mut state).unwrap();
+
+    let expected = Decl::Type(
+        "Foobar".to_string(),
+        Type::Channel(Box::new(Type::Record(Record {
+            props: vec![
+                Prop {
+                    label: Some("too".to_string()),
+                    val: Type::Name("String".to_string()),
+                },
+                Prop {
+                    label: None,
+                    val: Type::Channel(Box::new(Type::Record(Record {
+                        props: vec![Prop {
+                            label: None,
+                            val: Type::Name("Int".to_string()),
+                        }]
+                        .into(),
+                    }))),
+                },
+            ]
+            .into(),
+        }))),
+    );
 
     assert_eq!(expected, ast);
     assert_eq!(state.look_ahead().item(), &Sym::EOF);

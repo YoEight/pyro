@@ -243,7 +243,7 @@ impl<'a> Tokenizer<'a> {
                         "new" => Ok(Some(Sym::Keyword(Keyword::New))),
                         "and" => Ok(Some(Sym::Keyword(Keyword::And))),
                         "or" => Ok(Some(Sym::Keyword(Keyword::Or))),
-                        "type" => Ok(Some(Sym::Keyword(Keyword::Or))),
+                        "type" => Ok(Some(Sym::Keyword(Keyword::Type))),
                         _ => Ok(Some(Sym::Id(ident))),
                     }
                 }

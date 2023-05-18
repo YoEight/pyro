@@ -476,19 +476,13 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_new_channel(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
-        let pos = state.pos();
-        let key = self.parse_keyword(state)?;
-
-        if key != Keyword::New {
-            return Err(Error {
-                pos,
-                message: format!("Expected 'new' but got '{}' instead", key),
-            });
-        }
+        self.expect_keyword(state, Keyword::New)?;
+        state.skip_whitespace();
 
         let id = self.parse_id(state)?;
         state.skip_whitespace();
         self.parse_colon(state)?;
+        state.skip_whitespace();
         let r#type = self.parse_type(state)?;
 
         Ok(Decl::Channel(id, r#type))
@@ -503,7 +497,26 @@ impl<'a> Parser<'a> {
 
         Err(Error {
             pos: token.pos,
-            message: format!("Expected an identifier but got '{:?} instead", token.item()),
+            message: format!(
+                "Expected an identifier but got '{:?}' instead",
+                token.item()
+            ),
+        })
+    }
+
+    fn parse_type_id(&self, state: &mut ParserState) -> Result<String> {
+        let token = state.shift();
+
+        if let Sym::Type(s) = token.item() {
+            return Ok(s.clone());
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!(
+                "Expected an identifier but got '{:?}' instead",
+                token.item()
+            ),
         })
     }
 
@@ -613,7 +626,7 @@ impl<'a> Parser<'a> {
         self.expect_keyword(state, Keyword::Type)?;
         state.skip_whitespace();
 
-        let id = self.parse_id(state)?;
+        let id = self.parse_type_id(state)?;
         state.skip_whitespace();
 
         self.parse_eq(state)?;
