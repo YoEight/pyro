@@ -30,7 +30,15 @@ pub struct Abs<A> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Pat {
-    Var(Var),
+    Var(PatVar),
+    Record(Record<Pat>),
+    Wildcard(Type),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PatVar {
+    pub var: Var,
+    pub pattern: Option<Box<Pat>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

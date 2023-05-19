@@ -1,4 +1,4 @@
-use crate::ast::{Abs, Decl, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::ast::{Abs, Decl, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
 use crate::parser::{Parser, ParserState};
 use crate::sym::{Literal, Sym};
 use crate::tokenizer::{Pos, Tokenizer};
@@ -48,9 +48,12 @@ fn test_parse_abs_with_input() {
                 },
                 Tag {
                     item: Abs {
-                        pattern: Pat::Var(Var {
-                            id: "b".to_string(),
-                            r#type: Type::Anonymous,
+                        pattern: Pat::Var(PatVar {
+                            var: Var {
+                                id: "b".to_string(),
+                                r#type: Type::Anonymous,
+                            },
+                            pattern: None,
                         }),
                         proc: Box::new(Proc::Output(
                             Tag {
@@ -98,9 +101,12 @@ fn test_parse_parallel() {
                         },
                         Tag {
                             item: Abs {
-                                pattern: Pat::Var(Var {
-                                    id: "b".to_string(),
-                                    r#type: Type::Anonymous,
+                                pattern: Pat::Var(PatVar {
+                                    var: Var {
+                                        id: "b".to_string(),
+                                        r#type: Type::Anonymous,
+                                    },
+                                    pattern: None,
                                 }),
                                 proc: Box::new(Proc::Output(
                                     Tag {
@@ -132,9 +138,12 @@ fn test_parse_parallel() {
                         },
                         Tag {
                             item: Abs {
-                                pattern: Pat::Var(Var {
-                                    id: "d".to_string(),
-                                    r#type: Type::Anonymous,
+                                pattern: Pat::Var(PatVar {
+                                    var: Var {
+                                        id: "d".to_string(),
+                                        r#type: Type::Anonymous,
+                                    },
+                                    pattern: None,
                                 }),
                                 proc: Box::new(Proc::Null),
                             },
@@ -275,37 +284,37 @@ fn test_parse_type_decl() {
     assert_eq!(state.look_ahead().item(), &Sym::EOF);
 }
 
-// #[test]
-// fn test_parse_defs() {
-//     let query = include_str!("parse_defs.pi");
-//     let tokenizer = Tokenizer::new(query);
-//     let tokens = tokenizer.tokenize().unwrap();
-//     let mut state = ParserState::new(tokens.as_slice());
-//     let ast = state.parse_def().unwrap();
+#[test]
+fn test_parse_defs() {
+    let query = include_str!("parse_defs.pi");
+    let tokenizer = Tokenizer::new(query);
+    let tokens = tokenizer.tokenize().unwrap();
+    let mut state = ParserState::new(tokens.as_slice());
+    let ast = state.parse_def().unwrap();
 
-//     let expected = Decl::Type(
-//         "Foobar".to_string(),
-//         Type::Channel(Box::new(Type::Record(Record {
-//             props: vec![
-//                 Prop {
-//                     label: Some("too".to_string()),
-//                     val: Type::Name("String".to_string()),
-//                 },
-//                 Prop {
-//                     label: None,
-//                     val: Type::Channel(Box::new(Type::Record(Record {
-//                         props: vec![Prop {
-//                             label: None,
-//                             val: Type::Name("Int".to_string()),
-//                         }]
-//                         .into(),
-//                     }))),
-//                 },
-//             ]
-//             .into(),
-//         }))),
-//     );
+    let expected = Decl::Type(
+        "Foobar".to_string(),
+        Type::Channel(Box::new(Type::Record(Record {
+            props: vec![
+                Prop {
+                    label: Some("too".to_string()),
+                    val: Type::Name("String".to_string()),
+                },
+                Prop {
+                    label: None,
+                    val: Type::Channel(Box::new(Type::Record(Record {
+                        props: vec![Prop {
+                            label: None,
+                            val: Type::Name("Int".to_string()),
+                        }]
+                        .into(),
+                    }))),
+                },
+            ]
+            .into(),
+        }))),
+    );
 
-//     assert_eq!(expected, ast);
-//     assert_eq!(state.look_ahead().item(), &Sym::EOF);
-// }
+    assert_eq!(expected, ast);
+    assert_eq!(state.look_ahead().item(), &Sym::EOF);
+}
