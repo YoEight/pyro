@@ -24,7 +24,7 @@ fn test_parse_output() {
                     tag: Pos { line: 1, column: 7 },
                 },
             ),
-            tag: Pos { line: 1, column: 1 },
+            tag: Pos { line: 1, column: 5 },
         },
     };
 
@@ -72,7 +72,7 @@ fn test_parse_abs_with_input() {
                     tag: Pos { line: 1, column: 7 },
                 },
             ),
-            tag: Pos { line: 1, column: 1 },
+            tag: Pos { line: 1, column: 5 },
         },
     };
 
@@ -163,7 +163,7 @@ fn test_parse_parallel() {
                 ]
                 .into(),
             ),
-            tag: Pos { line: 1, column: 1 },
+            tag: Pos { line: 1, column: 5 },
         },
     };
 
@@ -175,9 +175,8 @@ fn test_parse_record_type() {
     let query = "[a=Foo Baz]";
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
-    let parser = Parser::new(tokens.as_slice());
     let mut state = ParserState::new(tokens.as_slice());
-    let ast = parser.parse_record_type(&mut state).unwrap();
+    let ast = state.parse_record_type().unwrap();
 
     let expected = Type::Record(Record {
         props: vec![
@@ -202,9 +201,8 @@ fn test_parse_record_value() {
     let query = "[a=b true c]";
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
-    let parser = Parser::new(tokens.as_slice());
     let mut state = ParserState::new(tokens.as_slice());
-    let ast = parser.parse_record_value(&mut state).unwrap().item;
+    let ast = state.parse_record_value().unwrap().item;
 
     let expected = Val::Record(Record {
         props: vec![
@@ -233,9 +231,8 @@ fn test_parse_new_channel() {
     let query = "new stream : Bool";
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
-    let parser = Parser::new(tokens.as_slice());
     let mut state = ParserState::new(tokens.as_slice());
-    let ast = parser.parse_decl(&mut state).unwrap();
+    let ast = state.parse_decl().unwrap();
 
     let expected = Decl::Channel("stream".to_string(), Type::Name("Bool".to_string()));
 
@@ -248,9 +245,8 @@ fn test_parse_type_decl() {
     let query = "type Foobar = ^[too=String ^[Int]]";
     let tokenizer = Tokenizer::new(query);
     let tokens = tokenizer.tokenize().unwrap();
-    let parser = Parser::new(tokens.as_slice());
     let mut state = ParserState::new(tokens.as_slice());
-    let ast = parser.parse_type_decl(&mut state).unwrap();
+    let ast = state.parse_type_decl().unwrap();
 
     let expected = Decl::Type(
         "Foobar".to_string(),
@@ -278,3 +274,38 @@ fn test_parse_type_decl() {
     assert_eq!(expected, ast);
     assert_eq!(state.look_ahead().item(), &Sym::EOF);
 }
+
+// #[test]
+// fn test_parse_defs() {
+//     let query = include_str!("parse_defs.pi");
+//     let tokenizer = Tokenizer::new(query);
+//     let tokens = tokenizer.tokenize().unwrap();
+//     let mut state = ParserState::new(tokens.as_slice());
+//     let ast = state.parse_def().unwrap();
+
+//     let expected = Decl::Type(
+//         "Foobar".to_string(),
+//         Type::Channel(Box::new(Type::Record(Record {
+//             props: vec![
+//                 Prop {
+//                     label: Some("too".to_string()),
+//                     val: Type::Name("String".to_string()),
+//                 },
+//                 Prop {
+//                     label: None,
+//                     val: Type::Channel(Box::new(Type::Record(Record {
+//                         props: vec![Prop {
+//                             label: None,
+//                             val: Type::Name("Int".to_string()),
+//                         }]
+//                         .into(),
+//                     }))),
+//                 },
+//             ]
+//             .into(),
+//         }))),
+//     );
+
+//     assert_eq!(expected, ast);
+//     assert_eq!(state.look_ahead().item(), &Sym::EOF);
+// }

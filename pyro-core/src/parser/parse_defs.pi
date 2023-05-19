@@ -1,0 +1,2 @@
+def tt[b:Boolean] = b?[t f] = t![]
+and ff[b:Boolean] = b?[t f] = f![]

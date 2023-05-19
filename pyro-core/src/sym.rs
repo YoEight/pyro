@@ -62,6 +62,52 @@ impl Display for Literal {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Punctuation {
+    /// '.'
+    Dot,
+    /// ':'
+    Colon,
+    /// Left parenthesis `)`
+    LParen,
+    /// Right parenthesis `)`
+    RParen,
+    /// Left bracket `[`
+    LBracket,
+    /// Right bracket `]`
+    RBracket,
+    /// Pipe `|`
+    Pipe,
+    /// Caret `^`
+    Caret,
+    /// Exclamation Mark `!`
+    ExclamationMark,
+    /// Question Mark `?`
+    QuestionMark,
+    /// ','
+    Comma,
+}
+
+impl Display for Punctuation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            Punctuation::Dot => ".",
+            Punctuation::Colon => ":",
+            Punctuation::LParen => "(",
+            Punctuation::RParen => ")",
+            Punctuation::LBracket => "[",
+            Punctuation::RBracket => "]",
+            Punctuation::Pipe => "|",
+            Punctuation::Caret => "^",
+            Punctuation::ExclamationMark => "!",
+            Punctuation::QuestionMark => "?",
+            Punctuation::Comma => ",",
+        };
+
+        write!(f, "{}", str)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Sym {
     /// An end-of-file marker, not a real token
@@ -71,10 +117,9 @@ pub enum Sym {
     Literal(Literal),
     // Identifier
     Id(String),
+    Punctuation(Punctuation),
     /// A keyword
     Keyword(Keyword),
-    /// Comma
-    Comma,
     /// Whitespace (space, tab, etc)
     Whitespace,
     /// `\n`
@@ -103,26 +148,6 @@ pub enum Sym {
     Div,
     /// Modulo Operator `%`
     Mod,
-    /// Left parenthesis `(`
-    LParen,
-    /// Right parenthesis `)`
-    RParen,
-    /// Colon `:`
-    Colon,
-    /// Left bracket `[`
-    LBracket,
-    /// Right bracket `]`
-    RBracket,
-    /// Pipe `|`
-    Pipe,
-    /// Caret `^`
-    Caret,
-    /// Exclamation Mark `!`
-    ExclamationMark,
-    /// Question Mark `?`
-    QuestionMark,
-    /// `.`
-    Dot,
     /// `@`
     At,
     /// `_`
@@ -135,9 +160,9 @@ impl Display for Sym {
             Sym::EOF => "EOF",
             Sym::Type(t) => t.as_str(),
             Sym::Literal(l) => return write!(f, "{}", l),
+            Sym::Punctuation(p) => return write!(f, "{}", p),
             Sym::Id(i) => i.as_str(),
             Sym::Keyword(k) => k.as_str(),
-            Sym::Comma => ",",
             Sym::Whitespace => " ",
             Sym::Newline => "\\n",
             Sym::DoubleEq => "==",
@@ -152,16 +177,6 @@ impl Display for Sym {
             Sym::Mul => "*",
             Sym::Div => "/",
             Sym::Mod => "%",
-            Sym::LParen => "(",
-            Sym::RParen => ")",
-            Sym::Colon => ":",
-            Sym::LBracket => "[",
-            Sym::RBracket => "]",
-            Sym::Pipe => "|",
-            Sym::Caret => "^",
-            Sym::ExclamationMark => "!",
-            Sym::QuestionMark => "?",
-            Sym::Dot => ".",
             Sym::At => "@",
             Sym::Underscore => "_",
         };

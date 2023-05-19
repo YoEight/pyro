@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::sym::{Keyword, Literal, Sym};
+use crate::sym::{Keyword, Literal, Punctuation, Sym};
 use std::fmt;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -136,15 +136,15 @@ impl<'a> Tokenizer<'a> {
                     Ok(Some(Sym::Newline))
                 }
 
-                '?' => self.consume(chars, Sym::QuestionMark),
-                '.' => self.consume(chars, Sym::Dot),
-                '^' => self.consume(chars, Sym::Caret),
-                ',' => self.consume(chars, Sym::Comma),
-                ':' => self.consume(chars, Sym::Colon),
-                '[' => self.consume(chars, Sym::LBracket),
-                ']' => self.consume(chars, Sym::RBracket),
-                '(' => self.consume(chars, Sym::LParen),
-                ')' => self.consume(chars, Sym::RParen),
+                '?' => self.consume(chars, Sym::Punctuation(Punctuation::QuestionMark)),
+                '.' => self.consume(chars, Sym::Punctuation(Punctuation::Dot)),
+                '^' => self.consume(chars, Sym::Punctuation(Punctuation::Caret)),
+                ',' => self.consume(chars, Sym::Punctuation(Punctuation::Comma)),
+                ':' => self.consume(chars, Sym::Punctuation(Punctuation::Colon)),
+                '[' => self.consume(chars, Sym::Punctuation(Punctuation::LBracket)),
+                ']' => self.consume(chars, Sym::Punctuation(Punctuation::RBracket)),
+                '(' => self.consume(chars, Sym::Punctuation(Punctuation::LParen)),
+                ')' => self.consume(chars, Sym::Punctuation(Punctuation::RParen)),
                 '@' => self.consume(chars, Sym::At),
                 '_' => self.consume(chars, Sym::Underscore),
                 '+' => self.consume(chars, Sym::Plus),
@@ -152,7 +152,7 @@ impl<'a> Tokenizer<'a> {
                 '*' => self.consume(chars, Sym::Mul),
                 '/' => self.consume(chars, Sym::Div),
                 '%' => self.consume(chars, Sym::Mod),
-                '|' => self.consume(chars, Sym::Pipe),
+                '|' => self.consume(chars, Sym::Punctuation(Punctuation::Pipe)),
 
                 '!' => {
                     chars.next();
@@ -160,7 +160,7 @@ impl<'a> Tokenizer<'a> {
                         return self.consume(chars, Sym::Neq);
                     }
 
-                    Ok(Some(Sym::ExclamationMark))
+                    Ok(Some(Sym::Punctuation(Punctuation::ExclamationMark)))
                 }
 
                 '>' => {

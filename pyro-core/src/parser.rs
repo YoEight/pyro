@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{Abs, Decl, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
-use crate::sym::{Keyword, Sym};
+use crate::ast::{Abs, Decl, Def, Pat, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::sym::{Keyword, Punctuation, Sym};
 use crate::tokenizer::{Pos, Token};
 use std::collections::VecDeque;
 use std::iter::Peekable;
@@ -56,199 +56,66 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn pos(&mut self) -> Pos {
-        self.look_ahead().pos
-    }
-}
+    pub fn skip_spaces(&mut self) {
+        match self.look_ahead().item() {
+            Sym::Whitespace | Sym::Newline => {
+                self.shift();
+            }
 
-pub struct Parser<'a> {
-    tokens: &'a [Token],
-}
-
-impl<'a> Parser<'a> {
-    pub fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens }
-    }
-
-    pub fn parse(&self) -> Result<Program<Pos>> {
-        let mut state = ParserState {
-            peekable: self.tokens.iter().peekable(),
+            _ => {}
         };
+    }
 
-        let start = state.shift();
+    pub fn followed_by_keyword(&mut self, key: Keyword) -> bool {
+        if let Sym::Keyword(actual) = self.look_ahead().item() {
+            return &key == actual;
+        }
 
-        if start.item != Sym::Keyword(Keyword::Run) {
+        false
+    }
+
+    fn expect(&mut self, expected: Sym) -> Result<()> {
+        let pos = self.pos();
+        let token = self.shift();
+
+        if &expected != token.item() {
             return Err(Error {
-                pos: start.pos,
-                message: "Program must start with run keyword".to_string(),
+                pos,
+                message: format!("Expected '{}' but got '{}' instead", expected, token.item()),
             });
         }
 
-        state.skip_whitespace();
+        Ok(())
+    }
 
-        let proc = self.parse_proc(&mut state)?;
+    fn expect_keyword(&mut self, expected: Keyword) -> Result<()> {
+        self.expect(Sym::Keyword(expected))
+    }
 
-        Ok(Program {
-            proc: Tag {
-                item: proc,
-                tag: start.pos,
-            },
+    fn expect_punctuation(&mut self, expected: Punctuation) -> Result<()> {
+        self.expect(Sym::Punctuation(expected))
+    }
+
+    pub fn followed_by<F>(&mut self, fun: F) -> bool
+    where
+        F: FnOnce(&Sym) -> bool,
+    {
+        fun(self.look_ahead().item())
+    }
+
+    pub fn followed_by_punc(&mut self, expected: Punctuation) -> bool {
+        self.followed_by(|sym| match sym {
+            Sym::Punctuation(p) => p == &expected,
+            _ => false,
         })
     }
 
-    pub fn parse_proc(&self, state: &mut ParserState) -> Result<Proc<Pos>> {
-        let mut token = state.look_ahead();
-
-        match token.item {
-            _ if start_like_val(token) => {
-                let lhs = self.parse_value(state)?;
-
-                state.skip_whitespace();
-                token = state.look_ahead();
-
-                match token.item {
-                    Sym::ExclamationMark => {
-                        state.shift();
-                        state.skip_whitespace();
-
-                        let rhs = self.parse_value(state)?;
-
-                        Ok(Proc::Output(lhs, rhs))
-                    }
-
-                    Sym::QuestionMark => {
-                        state.shift();
-                        state.skip_whitespace();
-
-                        let rhs = self.parse_abs(state)?;
-
-                        Ok(Proc::Input(lhs, rhs))
-                    }
-                    _ => {
-                        return Err(Error {
-                            pos: token.pos,
-                            message: format!("Unexpected token '{}'", token.item()),
-                        })
-                    }
-                }
-            }
-
-            Sym::LParen => {
-                state.shift();
-                state.skip_whitespace();
-
-                let token = state.look_ahead();
-                if token.item() == &Sym::RParen {
-                    state.shift();
-
-                    Ok(Proc::Null)
-                } else if start_like_decl(token) {
-                    self.parse_local_decl(state)
-                } else {
-                    self.parse_parallel_composition(state)
-                }
-            }
-
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn parse_value(&self, state: &mut ParserState) -> Result<Tag<Val, Pos>> {
-        let token = state.shift();
-
-        match token.item() {
-            Sym::Literal(lit) => Ok(Tag {
-                item: Val::Literal(lit.clone()),
-                tag: token.pos,
-            }),
-
-            Sym::Id(head) => self.parse_path(state, token.pos, head.clone()),
-
-            Sym::RBracket => self.parse_record_value(state),
-
-            _ => Err(Error {
-                pos: token.pos,
-                message: format!("Expected parsing a value but got {} instead", token.item),
-            }),
-        }
-    }
-
-    pub fn parse_path(
-        &self,
-        state: &mut ParserState,
-        start: Pos,
-        head: String,
-    ) -> Result<Tag<Val, Pos>> {
-        let mut path = VecDeque::new();
-
-        path.push_back(head);
-
-        loop {
-            let mut token = state.look_ahead();
-
-            if token.item != Sym::Dot {
-                break;
-            }
-
-            state.shift();
-            token = state.shift();
-
-            match &token.item {
-                Sym::Id(id) => path.push_back(id.clone()),
-                _ => {
-                    return Err(Error {
-                        pos: token.pos,
-                        message: format!("Expected an identifier but got {} instead", token.item),
-                    });
-                }
-            }
-        }
-
-        Ok(Tag {
-            item: Val::Path(path),
-            tag: start,
-        })
-    }
-
-    pub fn parse_abs(&self, state: &mut ParserState) -> Result<Tag<Abs<Pos>, Pos>> {
-        let token = state.look_ahead();
-
-        match token.item() {
-            Sym::Id(_) => {
-                let var = self.parse_variable(state)?;
-                let pat = Pat::Var(var);
-
-                state.skip_whitespace();
-                let sep = state.shift();
-
-                if sep.item() != &Sym::Eq {
-                    return Err(Error {
-                        pos: sep.pos,
-                        message: format!("Expecting '=' but got '{}' instead", sep.item()),
-                    });
-                }
-
-                state.skip_whitespace();
-                let proc = self.parse_proc(state)?;
-
-                Ok(Tag {
-                    item: Abs {
-                        pattern: pat,
-                        proc: Box::new(proc),
-                    },
-                    tag: token.pos,
-                })
-            }
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn parse_variable(&self, state: &mut ParserState) -> Result<Var> {
-        let token = state.shift();
+    pub fn parse_variable(&mut self) -> Result<Var> {
+        let token = self.shift();
         match &token.item {
             Sym::Id(name) => {
-                state.skip_whitespace();
-                let r#type = self.parse_rtype(state)?;
+                self.skip_whitespace();
+                let r#type = self.parse_rtype()?;
 
                 Ok(Var {
                     id: name.clone(),
@@ -263,285 +130,38 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse_rtype(&self, state: &mut ParserState) -> Result<Type> {
-        let token = state.look_ahead();
-        match token.item() {
-            Sym::Colon => {
-                state.shift();
-                state.skip_whitespace();
-
-                self.parse_type(state)
-            }
-
-            _ => Ok(Type::Anonymous),
+    pub fn parse_rtype(&mut self) -> Result<Type> {
+        if self.followed_by_punc(Punctuation::Colon) {
+            self.shift();
+            self.skip_whitespace();
+            self.parse_type()
+        } else {
+            Ok(Type::Anonymous)
         }
     }
 
-    pub fn parse_record_type(&self, state: &mut ParserState) -> Result<Type> {
-        let mut token = state.shift();
-
-        if token.item() != &Sym::LBracket {
-            return Err(Error {
-                pos: token.pos,
-                message: format!(
-                    "Expected '[' to parse a record but got {} instead",
-                    token.item()
-                ),
-            });
-        }
-
-        state.skip_whitespace();
-
-        token = state.look_ahead();
-        let mut props = VecDeque::new();
-
-        loop {
-            if token.item() == &Sym::RBracket {
-                state.shift();
-                break;
-            }
-
-            let label = self.parse_type_label(state)?;
-            let r#type = self.parse_type(state)?;
-
-            state.skip_whitespace();
-            props.push_back(Prop { label, val: r#type });
-            token = state.look_ahead();
-        }
-
-        Ok(Type::Record(Record { props }))
-    }
-
-    fn parse_local_decl(&self, state: &mut ParserState) -> Result<Proc<Pos>> {
-        let decl = self.parse_decl(state)?;
-
-        state.skip_whitespace();
-        state.skip_newline();
-
-        let pos = state.pos();
-        let proc = self.parse_proc(state)?;
-
-        Ok(Proc::Decl(
-            decl,
-            Tag {
-                item: Box::new(proc),
-                tag: pos,
-            },
-        ))
-    }
-
-    fn parse_decl(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
-        let token = state.look_ahead();
-
-        state.skip_whitespace();
-
-        match token.item() {
-            Sym::Keyword(key) => match key {
-                Keyword::New => self.parse_new_channel(state),
-                Keyword::Def => self.parse_def(state),
-                Keyword::Type => self.parse_type_decl(state),
-                _ => Err(Error {
-                    pos: token.pos,
-                    message: format!("Unexpected keyword '{}'", key),
-                }),
-            },
-
-            _ => Err(Error {
-                pos: token.pos,
-                message: format!("Expecting a declaration but got '{}' instead", token.item),
-            }),
-        }
-    }
-
-    fn parse_parallel_composition(&self, state: &mut ParserState) -> Result<Proc<Pos>> {
-        let mut processes = VecDeque::new();
-
-        processes.push_back(self.parse_proc(state)?);
-
-        state.skip_whitespace();
-        let mut first_time = true;
-        let mut token = state.look_ahead();
-
-        loop {
-            match token.item {
-                Sym::RParen if !first_time => {
-                    state.shift();
-                    break;
-                }
-
-                Sym::Pipe => {
-                    state.shift();
-                    state.skip_whitespace();
-                    processes.push_back(self.parse_proc(state)?);
-                    state.skip_whitespace();
-                    first_time = false;
-                    token = state.look_ahead();
-                }
-
-                _ => {
-                    panic!("{:?}: Expecting a '|' to separate processes", token.pos);
-                }
-            }
-        }
-
-        Ok(Proc::Parallel(processes))
-    }
-
-    fn parse_type_label(&self, state: &mut ParserState) -> Result<Option<String>> {
-        let mut token = state.look_ahead();
-
-        match token.item() {
-            Sym::Id(id) => {
-                state.shift();
-                token = state.shift();
-
-                if token.item() != &Sym::Eq {
-                    return Err(Error {
-                        pos: token.pos,
-                        message: format!(
-                            "Expected '=' when parsing a record label property but got {} instead",
-                            token.item()
-                        ),
-                    });
-                }
-
-                Ok(Some(id.clone()))
-            }
-
-            _ => Ok(None),
-        }
-    }
-
-    fn parse_record_value(&self, state: &mut ParserState) -> Result<Tag<Val, Pos>> {
-        let pos = state.pos();
-        let mut token = state.shift();
-
-        if token.item() != &Sym::LBracket {
-            return Err(Error {
-                pos: token.pos,
-                message: format!(
-                    "Expected '[' to parse a record but got {} instead",
-                    token.item
-                ),
-            });
-        }
-
-        state.skip_whitespace();
-
-        token = state.look_ahead();
-        let mut props = VecDeque::new();
-
-        loop {
-            if token.item() == &Sym::RBracket {
-                state.shift();
-                break;
-            }
-
-            let chk_state = state.clone();
-            token = state.shift();
-
-            let label = match token.item() {
-                Sym::Id(id) => {
-                    token = state.shift();
-
-                    if token.item() == &Sym::Eq {
-                        Some(id.clone())
-                    } else {
-                        *state = chk_state;
-                        None
-                    }
-                }
-
-                _ => {
-                    *state = chk_state;
-                    None
-                }
-            };
-
-            let tag = self.parse_value(state)?;
-
-            state.skip_whitespace();
-            props.push_back(Prop {
-                label,
-                val: tag.item,
-            });
-
-            token = state.look_ahead();
-        }
-
-        Ok(Tag {
-            item: Val::Record(Record { props }),
-            tag: pos,
-        })
-    }
-
-    fn parse_new_channel(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
-        self.expect_keyword(state, Keyword::New)?;
-        state.skip_whitespace();
-
-        let id = self.parse_id(state)?;
-        state.skip_whitespace();
-        self.parse_colon(state)?;
-        state.skip_whitespace();
-        let r#type = self.parse_type(state)?;
-
-        Ok(Decl::Channel(id, r#type))
-    }
-
-    fn parse_id(&self, state: &mut ParserState) -> Result<String> {
-        let token = state.shift();
-
-        if let Sym::Id(s) = token.item() {
-            return Ok(s.clone());
-        }
-
-        Err(Error {
-            pos: token.pos,
-            message: format!(
-                "Expected an identifier but got '{:?}' instead",
-                token.item()
-            ),
-        })
-    }
-
-    fn parse_type_id(&self, state: &mut ParserState) -> Result<String> {
-        let token = state.shift();
-
-        if let Sym::Type(s) = token.item() {
-            return Ok(s.clone());
-        }
-
-        Err(Error {
-            pos: token.pos,
-            message: format!(
-                "Expected an identifier but got '{:?}' instead",
-                token.item()
-            ),
-        })
-    }
-
-    fn parse_type(&self, state: &mut ParserState) -> Result<Type> {
+    fn parse_type(&mut self) -> Result<Type> {
         enum Constr {
             InOut,
         }
 
         let mut constrs = Vec::new();
         let mut r#type = loop {
-            let token = state.look_ahead();
+            let token = self.look_ahead();
 
             match token.item() {
                 Sym::Type(s) => {
-                    state.shift();
+                    self.shift();
                     break Type::Name(s.clone());
                 }
 
-                Sym::Caret => {
-                    state.shift();
-                    constrs.push(Constr::InOut);
-                }
-
-                Sym::LBracket => {
-                    break self.parse_record_type(state)?;
+                Sym::Punctuation(p) if p == &Punctuation::Caret || p == &Punctuation::LBracket => {
+                    if p == &Punctuation::Caret {
+                        self.shift();
+                        constrs.push(Constr::InOut);
+                    } else {
+                        break self.parse_record_type()?;
+                    }
                 }
 
                 _ => {
@@ -565,82 +185,459 @@ impl<'a> Parser<'a> {
         return Ok(r#type);
     }
 
-    fn parse_colon(&self, state: &mut ParserState) -> Result<()> {
-        let token = state.shift();
+    pub fn parse_value(&mut self) -> Result<Tag<Val, Pos>> {
+        let token = self.shift();
 
-        if let Sym::Colon = token.item() {
-            return Ok(());
+        match token.item() {
+            Sym::Literal(lit) => Ok(Tag {
+                item: Val::Literal(lit.clone()),
+                tag: token.pos,
+            }),
+
+            Sym::Id(head) => self.parse_path(token.pos, head.clone()),
+
+            Sym::Punctuation(Punctuation::LBracket) => self.parse_record_value(),
+
+            _ => Err(Error {
+                pos: token.pos,
+                message: format!("Expected parsing a value but got {} instead", token.item),
+            }),
+        }
+    }
+
+    pub fn parse_path(&mut self, start: Pos, head: String) -> Result<Tag<Val, Pos>> {
+        let mut path = VecDeque::new();
+
+        path.push_back(head);
+
+        loop {
+            if !self.followed_by_punc(Punctuation::Dot) {
+                break;
+            }
+
+            self.shift();
+            let token = self.shift();
+
+            match &token.item {
+                Sym::Id(id) => path.push_back(id.clone()),
+                _ => {
+                    return Err(Error {
+                        pos: token.pos,
+                        message: format!("Expected an identifier but got {} instead", token.item),
+                    });
+                }
+            }
         }
 
-        Err(Error {
-            pos: token.pos,
-            message: format!("Expected ':' but got '{}' instead", token.item()),
+        Ok(Tag {
+            item: Val::Path(path),
+            tag: start,
         })
     }
 
-    fn parse_eq(&self, state: &mut ParserState) -> Result<()> {
-        let token = state.shift();
+    pub fn parse_record_type(&mut self) -> Result<Type> {
+        self.expect_punctuation(Punctuation::LBracket)?;
+        self.skip_whitespace();
 
-        if let Sym::Eq = token.item() {
-            return Ok(());
+        let mut props = VecDeque::new();
+
+        loop {
+            if self.followed_by_punc(Punctuation::RBracket) {
+                self.shift();
+                break;
+            }
+
+            let label = self.parse_type_label()?;
+            let r#type = self.parse_type()?;
+
+            self.skip_whitespace();
+            props.push_back(Prop { label, val: r#type });
         }
 
-        Err(Error {
-            pos: token.pos,
-            message: format!("Expected '=' but got '{}' instead", token.item()),
-        })
+        Ok(Type::Record(Record { props }))
     }
 
-    fn parse_keyword(&self, state: &mut ParserState) -> Result<Keyword> {
-        let token = state.shift();
+    fn parse_record_value(&mut self) -> Result<Tag<Val, Pos>> {
+        let pos = self.pos();
+        self.expect_punctuation(Punctuation::LBracket)?;
+        self.skip_whitespace();
 
-        if let Sym::Keyword(key) = token.item() {
-            return Ok(*key);
-        }
+        let mut props = VecDeque::new();
 
-        Err(Error {
-            pos: token.pos,
-            message: format!("Expected a keyword but got '{}' instead", token.item()),
-        })
-    }
+        loop {
+            if self.followed_by_punc(Punctuation::RBracket) {
+                self.shift();
+                break;
+            }
 
-    fn parse_def(&self, _state: &mut ParserState) -> Result<Decl<Pos>> {
-        todo!()
-    }
+            let chk_state = self.clone();
+            let mut token = self.shift();
 
-    fn expect_keyword(&self, state: &mut ParserState, expected: Keyword) -> Result<()> {
-        let pos = state.pos();
-        let key = self.parse_keyword(state)?;
+            let label = match token.item() {
+                Sym::Id(id) => {
+                    token = self.shift();
 
-        if expected != key {
-            return Err(Error {
-                pos,
-                message: format!("Expected '{}' but got '{}' instead", expected, key),
+                    if token.item() == &Sym::Eq {
+                        Some(id.clone())
+                    } else {
+                        *self = chk_state;
+                        None
+                    }
+                }
+
+                _ => {
+                    *self = chk_state;
+                    None
+                }
+            };
+
+            let tag = self.parse_value()?;
+
+            self.skip_whitespace();
+            props.push_back(Prop {
+                label,
+                val: tag.item,
             });
         }
 
-        Ok(())
+        Ok(Tag {
+            item: Val::Record(Record { props }),
+            tag: pos,
+        })
     }
 
-    fn parse_type_decl(&self, state: &mut ParserState) -> Result<Decl<Pos>> {
-        self.expect_keyword(state, Keyword::Type)?;
-        state.skip_whitespace();
+    fn parse_type_label(&mut self) -> Result<Option<String>> {
+        let token = self.look_ahead();
 
-        let id = self.parse_type_id(state)?;
-        state.skip_whitespace();
+        match token.item() {
+            Sym::Id(id) => {
+                self.shift();
+                self.expect(Sym::Eq)?;
 
-        self.parse_eq(state)?;
-        state.skip_whitespace();
+                Ok(Some(id.clone()))
+            }
 
-        let r#type = self.parse_type(state)?;
+            _ => Ok(None),
+        }
+    }
+
+    pub fn parse_proc(&mut self) -> Result<Proc<Pos>> {
+        let mut token = self.look_ahead();
+
+        match token.item {
+            _ if start_like_val(token) => {
+                let lhs = self.parse_value()?;
+
+                self.skip_whitespace();
+                token = self.look_ahead();
+
+                match token.item {
+                    Sym::Punctuation(p)
+                        if p == Punctuation::ExclamationMark || p == Punctuation::QuestionMark =>
+                    {
+                        if p == Punctuation::ExclamationMark {
+                            self.shift();
+                            self.skip_whitespace();
+
+                            Ok(Proc::Output(lhs, self.parse_value()?))
+                        } else {
+                            self.shift();
+                            self.skip_whitespace();
+
+                            Ok(Proc::Input(lhs, self.parse_abs()?))
+                        }
+                    }
+
+                    _ => {
+                        return Err(Error {
+                            pos: token.pos,
+                            message: format!("Unexpected token '{}'", token.item()),
+                        })
+                    }
+                }
+            }
+
+            Sym::Punctuation(Punctuation::LParen) => {
+                self.shift();
+                self.skip_whitespace();
+
+                if self.followed_by_punc(Punctuation::RParen) {
+                    self.shift();
+
+                    Ok(Proc::Null)
+                } else if start_like_decl(self.look_ahead()) {
+                    self.parse_local_decl()
+                } else {
+                    self.parse_parallel_composition()
+                }
+            }
+
+            _ => Err(Error {
+                pos: token.pos,
+                message: format!("Unexpected token '{}'", token.item()),
+            }),
+        }
+    }
+
+    pub fn parse_abs(&mut self) -> Result<Tag<Abs<Pos>, Pos>> {
+        let token = self.look_ahead();
+
+        match token.item() {
+            Sym::Id(_) => {
+                let var = self.parse_variable()?;
+                let pat = Pat::Var(var);
+
+                self.skip_whitespace();
+                self.expect(Sym::Eq)?;
+                self.skip_whitespace();
+                let proc = self.parse_proc()?;
+
+                Ok(Tag {
+                    item: Abs {
+                        pattern: pat,
+                        proc: Box::new(proc),
+                    },
+                    tag: token.pos,
+                })
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    fn parse_local_decl(&mut self) -> Result<Proc<Pos>> {
+        let decl = self.parse_decl()?;
+
+        self.skip_spaces();
+
+        let pos = self.pos();
+        let proc = self.parse_proc()?;
+
+        Ok(Proc::Decl(
+            decl,
+            Tag {
+                item: Box::new(proc),
+                tag: pos,
+            },
+        ))
+    }
+
+    fn parse_decl(&mut self) -> Result<Decl<Pos>> {
+        let token = self.look_ahead();
+
+        self.skip_whitespace();
+
+        match token.item() {
+            Sym::Keyword(key) => match key {
+                Keyword::New => self.parse_new_channel(),
+                Keyword::Def => self.parse_def(),
+                Keyword::Type => self.parse_type_decl(),
+                _ => Err(Error {
+                    pos: token.pos,
+                    message: format!("Unexpected keyword '{}'", key),
+                }),
+            },
+
+            _ => Err(Error {
+                pos: token.pos,
+                message: format!("Expecting a declaration but got '{}' instead", token.item),
+            }),
+        }
+    }
+
+    fn parse_parallel_composition(&mut self) -> Result<Proc<Pos>> {
+        let mut processes = VecDeque::new();
+
+        processes.push_back(self.parse_proc()?);
+
+        self.skip_whitespace();
+        let mut first_time = true;
+
+        loop {
+            if self.followed_by_punc(Punctuation::RParen) && !first_time {
+                self.shift();
+                break;
+            }
+
+            if self.followed_by_punc(Punctuation::Pipe) {
+                self.shift();
+                self.skip_whitespace();
+                processes.push_back(self.parse_proc()?);
+                self.skip_whitespace();
+                first_time = false;
+                continue;
+            }
+
+            return Err(Error {
+                pos: self.pos(),
+                message: format!(
+                    "Expected a '|' to separate processes but got '{}' instead",
+                    self.look_ahead().item()
+                ),
+            });
+        }
+
+        Ok(Proc::Parallel(processes))
+    }
+
+    fn parse_def(&mut self) -> Result<Decl<Pos>> {
+        self.expect_keyword(Keyword::Def)?;
+        self.skip_whitespace();
+
+        let mut defs = VecDeque::new();
+
+        loop {
+            let id = self.parse_id()?;
+            self.skip_whitespace();
+            let abs = self.parse_abs()?;
+            self.skip_spaces();
+
+            defs.push_back(Def {
+                name: id,
+                abs: abs.item,
+            });
+
+            if !self.followed_by_keyword(Keyword::And) {
+                break;
+            }
+
+            self.shift();
+            self.skip_whitespace();
+        }
+
+        Ok(Decl::Def(defs))
+    }
+
+    fn parse_type_decl(&mut self) -> Result<Decl<Pos>> {
+        self.expect_keyword(Keyword::Type)?;
+        self.skip_whitespace();
+
+        let id = self.parse_type_id()?;
+        self.skip_whitespace();
+        self.expect(Sym::Eq)?;
+        self.skip_whitespace();
+
+        let r#type = self.parse_type()?;
 
         Ok(Decl::Type(id, r#type))
     }
+
+    fn parse_new_channel(&mut self) -> Result<Decl<Pos>> {
+        self.expect_keyword(Keyword::New)?;
+        self.skip_whitespace();
+
+        let id = self.parse_id()?;
+        self.skip_whitespace();
+        self.expect_punctuation(Punctuation::Colon)?;
+        self.skip_whitespace();
+        let r#type = self.parse_type()?;
+
+        Ok(Decl::Channel(id, r#type))
+    }
+
+    fn parse_id(&mut self) -> Result<String> {
+        let token = self.shift();
+
+        if let Sym::Id(s) = token.item() {
+            return Ok(s.clone());
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!(
+                "Expected an identifier but got '{:?}' instead",
+                token.item()
+            ),
+        })
+    }
+
+    fn parse_type_id(&mut self) -> Result<String> {
+        let token = self.shift();
+
+        if let Sym::Type(s) = token.item() {
+            return Ok(s.clone());
+        }
+
+        Err(Error {
+            pos: token.pos,
+            message: format!(
+                "Expected an identifier but got '{:?}' instead",
+                token.item()
+            ),
+        })
+    }
+
+    pub fn pos(&mut self) -> Pos {
+        self.look_ahead().pos
+    }
+}
+
+pub struct Parser<'a> {
+    tokens: &'a [Token],
+}
+
+impl<'a> Parser<'a> {
+    pub fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens }
+    }
+
+    pub fn parse(&self) -> Result<Program<Pos>> {
+        let mut state = ParserState {
+            peekable: self.tokens.iter().peekable(),
+        };
+
+        state.expect_keyword(Keyword::Run)?;
+        state.skip_whitespace();
+
+        let pos = state.pos();
+        let proc = state.parse_proc()?;
+
+        Ok(Program {
+            proc: Tag {
+                item: proc,
+                tag: pos,
+            },
+        })
+    }
+
+    // pub fn parse_record_pattern(&self, state: &mut ParserState) -> Result<Type> {
+    //     let mut token = state.shift();
+    //
+    //     if token.item() != &Sym::LBracket {
+    //         return Err(Error {
+    //             pos: token.pos,
+    //             message: format!(
+    //                 "Expected '[' to parse a record but got {} instead",
+    //                 token.item()
+    //             ),
+    //         });
+    //     }
+    //
+    //     state.skip_whitespace();
+    //
+    //     token = state.look_ahead();
+    //     let mut props = VecDeque::new();
+    //
+    //     loop {
+    //         if token.item() == &Sym::RBracket {
+    //             state.shift();
+    //             break;
+    //         }
+    //
+    //         let label = self.parse_type_label(state)?;
+    //         let r#type = self.parse_type(state)?;
+    //
+    //         state.skip_whitespace();
+    //         props.push_back(Prop { label, val: r#type });
+    //         token = state.look_ahead();
+    //     }
+    //
+    //     Ok(Type::Record(Record { props }))
+    // }
 }
 
 fn start_like_val(token: &Token) -> bool {
     match &token.item {
-        Sym::Literal(_) | Sym::LBracket => true,
+        Sym::Literal(_) | Sym::Punctuation(Punctuation::LBracket) => true,
         _ => start_like_path(token),
     }
 }

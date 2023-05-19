@@ -1,4 +1,4 @@
-use crate::sym::Literal;
+use crate::sym::{Literal, Punctuation};
 use crate::tokenizer::{Keyword, Pos, Sym, Token, Tokenizer};
 
 #[test]
@@ -16,7 +16,7 @@ fn tokenize_simple_expr() {
             pos: Pos { line: 1, column: 4 },
         },
         Token {
-            item: Sym::LParen,
+            item: Sym::Punctuation(Punctuation::LParen),
             pos: Pos { line: 1, column: 5 },
         },
         Token {
@@ -24,7 +24,7 @@ fn tokenize_simple_expr() {
             pos: Pos { line: 1, column: 6 },
         },
         Token {
-            item: Sym::QuestionMark,
+            item: Sym::Punctuation(Punctuation::QuestionMark),
             pos: Pos { line: 1, column: 7 },
         },
         Token {
@@ -57,7 +57,7 @@ fn tokenize_simple_expr() {
             },
         },
         Token {
-            item: Sym::ExclamationMark,
+            item: Sym::Punctuation(Punctuation::ExclamationMark),
             pos: Pos {
                 line: 1,
                 column: 17,
@@ -78,7 +78,7 @@ fn tokenize_simple_expr() {
             },
         },
         Token {
-            item: Sym::Pipe,
+            item: Sym::Punctuation(Punctuation::Pipe),
             pos: Pos {
                 line: 1,
                 column: 28,
@@ -99,7 +99,7 @@ fn tokenize_simple_expr() {
             },
         },
         Token {
-            item: Sym::ExclamationMark,
+            item: Sym::Punctuation(Punctuation::ExclamationMark),
             pos: Pos {
                 line: 1,
                 column: 31,
@@ -113,7 +113,7 @@ fn tokenize_simple_expr() {
             },
         },
         Token {
-            item: Sym::RParen,
+            item: Sym::Punctuation(Punctuation::RParen),
             pos: Pos {
                 line: 1,
                 column: 33,
