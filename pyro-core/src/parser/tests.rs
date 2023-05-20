@@ -13,7 +13,7 @@ fn test_parse_output() {
     let ast = parser.parse().unwrap();
 
     let expected = Program {
-        proc: Tag {
+        procs: vec![Tag {
             item: Proc::Output(
                 Tag {
                     item: Val::Path(vec!["x".to_string()].into()),
@@ -25,7 +25,8 @@ fn test_parse_output() {
                 },
             ),
             tag: Pos { line: 1, column: 5 },
-        },
+        }]
+        .into(),
     };
 
     assert_eq!(expected, ast);
@@ -40,7 +41,7 @@ fn test_parse_abs_with_input() {
     let ast = parser.parse().unwrap();
 
     let expected = Program {
-        proc: Tag {
+        procs: vec![Tag {
             item: Proc::Input(
                 Tag {
                     item: Val::Path(vec!["a".to_string()].into()),
@@ -76,7 +77,8 @@ fn test_parse_abs_with_input() {
                 },
             ),
             tag: Pos { line: 1, column: 5 },
-        },
+        }]
+        .into(),
     };
 
     assert_eq!(expected, ast);
@@ -91,7 +93,7 @@ fn test_parse_parallel() {
     let ast = parser.parse().unwrap();
 
     let expected = Program {
-        proc: Tag {
+        procs: vec![Tag {
             item: Proc::Parallel(
                 vec![
                     Proc::Input(
@@ -173,7 +175,8 @@ fn test_parse_parallel() {
                 .into(),
             ),
             tag: Pos { line: 1, column: 5 },
-        },
+        }]
+        .into(),
     };
 
     assert_eq!(expected, ast);

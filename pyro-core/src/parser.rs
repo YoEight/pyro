@@ -101,12 +101,8 @@ impl<'a> ParserState<'a> {
         };
     }
 
-    pub fn followed_by_keyword(&mut self, key: Keyword) -> bool {
-        if let Sym::Keyword(actual) = self.look_ahead().item() {
-            return &key == actual;
-        }
-
-        false
+    pub fn next_keyword(&mut self, key: Keyword) -> bool {
+        self.next_sym(Sym::Keyword(key))
     }
 
     fn expect(&mut self, expected: Sym) -> Result<()> {
@@ -138,11 +134,12 @@ impl<'a> ParserState<'a> {
         fun(self.look_ahead().item())
     }
 
-    pub fn followed_by_punc(&mut self, expected: Punctuation) -> bool {
-        self.followed_by(|sym| match sym {
-            Sym::Punctuation(p) => p == &expected,
-            _ => false,
-        })
+    pub fn next_sym(&mut self, sym: Sym) -> bool {
+        self.followed_by(|s| s == &sym)
+    }
+
+    pub fn next_punct(&mut self, expected: Punctuation) -> bool {
+        self.next_sym(Sym::Punctuation(expected))
     }
 
     pub fn parse_variable(&mut self) -> Result<Var> {
@@ -166,7 +163,7 @@ impl<'a> ParserState<'a> {
     }
 
     pub fn parse_rtype(&mut self) -> Result<Type> {
-        if self.followed_by_punc(Punctuation::Colon) {
+        if self.next_punct(Punctuation::Colon) {
             self.shift();
             self.skip_whitespace();
             self.parse_type()
@@ -253,7 +250,7 @@ impl<'a> ParserState<'a> {
         path.push_back(head);
 
         loop {
-            if !self.followed_by_punc(Punctuation::Dot) {
+            if !self.next_punct(Punctuation::Dot) {
                 break;
             }
 
@@ -287,7 +284,7 @@ impl<'a> ParserState<'a> {
         let mut props = VecDeque::new();
 
         loop {
-            if self.followed_by_punc(Punctuation::RBracket) {
+            if self.next_punct(Punctuation::RBracket) {
                 self.shift();
                 break;
             }
@@ -326,7 +323,7 @@ impl<'a> ParserState<'a> {
 
         match token.item() {
             Sym::Id(id) => {
-                if self.followed_by(|sym| sym == &Sym::Eq) {
+                if self.next_sym(Sym::Eq) {
                     self.shift();
                     return Ok(Some(id.clone()));
                 }
@@ -382,7 +379,7 @@ impl<'a> ParserState<'a> {
                 self.shift();
                 self.skip_whitespace();
 
-                if self.followed_by_punc(Punctuation::RParen) {
+                if self.next_punct(Punctuation::RParen) {
                     self.shift();
 
                     Ok(Proc::Null)
@@ -427,7 +424,7 @@ impl<'a> ParserState<'a> {
                 let var = self.parse_variable()?;
                 self.skip_whitespace();
 
-                let pattern = if self.followed_by(|sym| sym == &Sym::At) {
+                let pattern = if self.next_sym(Sym::At) {
                     self.shift();
                     Some(Box::new(self.parse_pat()?))
                 } else {
@@ -502,12 +499,12 @@ impl<'a> ParserState<'a> {
         let mut first_time = true;
 
         loop {
-            if self.followed_by_punc(Punctuation::RParen) && !first_time {
+            if self.next_punct(Punctuation::RParen) && !first_time {
                 self.shift();
                 break;
             }
 
-            if self.followed_by_punc(Punctuation::Pipe) {
+            if self.next_punct(Punctuation::Pipe) {
                 self.shift();
                 self.skip_whitespace();
                 processes.push_back(self.parse_proc()?);
@@ -545,7 +542,7 @@ impl<'a> ParserState<'a> {
                 abs: abs.item,
             });
 
-            if !self.followed_by_keyword(Keyword::And) {
+            if !self.next_keyword(Keyword::And) {
                 break;
             }
 
@@ -637,15 +634,27 @@ impl<'a> Parser<'a> {
         state.expect_keyword(Keyword::Run)?;
         state.skip_whitespace();
 
-        let pos = state.pos();
-        let proc = state.parse_proc()?;
+        let mut procs = VecDeque::new();
 
-        Ok(Program {
-            proc: Tag {
-                item: proc,
+        loop {
+            let pos = state.pos();
+
+            procs.push_back(Tag {
+                item: state.parse_proc()?,
                 tag: pos,
-            },
-        })
+            });
+
+            state.skip_spaces();
+            if !state.next_keyword(Keyword::New) {
+                break;
+            }
+
+            state.shift();
+        }
+
+        state.expect(Sym::EOF)?;
+
+        Ok(Program { procs })
     }
 }
 

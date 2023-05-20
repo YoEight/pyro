@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Program<A> {
-    pub proc: Tag<Proc<A>, A>,
+    pub procs: VecDeque<Tag<Proc<A>, A>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
