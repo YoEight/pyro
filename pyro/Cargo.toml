@@ -8,4 +8,9 @@ edition = "2021"
 [dependencies.pyro-core]
 path = "../pyro-core"
 
+[dependencies.clap]
+version = "4.3"
+features = ["derive"]
+
 [dependencies]
+eyre = "0.6"

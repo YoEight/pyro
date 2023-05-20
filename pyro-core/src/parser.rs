@@ -14,6 +14,8 @@ pub struct Error {
     message: String,
 }
 
+impl std::error::Error for Error {}
+
 pub type Result<A> = std::result::Result<A, Error>;
 
 impl std::fmt::Display for Error {
@@ -92,13 +94,15 @@ impl<'a> ParserState<'a> {
     }
 
     pub fn skip_spaces(&mut self) {
-        match self.look_ahead().item() {
-            Sym::Whitespace | Sym::Newline => {
-                self.shift();
-            }
+        loop {
+            match self.look_ahead().item() {
+                Sym::Whitespace | Sym::Newline => {
+                    self.shift();
+                }
 
-            _ => {}
-        };
+                _ => break,
+            }
+        }
     }
 
     pub fn next_keyword(&mut self, key: Keyword) -> bool {
@@ -458,6 +462,8 @@ impl<'a> ParserState<'a> {
         let pos = self.pos();
         let proc = self.parse_proc()?;
 
+        self.expect_punctuation(Punctuation::RParen)?;
+
         Ok(Proc::Decl(
             decl,
             Tag {
@@ -469,8 +475,6 @@ impl<'a> ParserState<'a> {
 
     fn parse_decl(&mut self) -> Result<Decl<Pos>> {
         let token = self.look_ahead();
-
-        self.skip_whitespace();
 
         match token.item() {
             Sym::Keyword(key) => match key {
@@ -652,6 +656,7 @@ impl<'a> Parser<'a> {
             state.shift();
         }
 
+        state.skip_spaces();
         state.expect(Sym::EOF)?;
 
         Ok(Program { procs })
