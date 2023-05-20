@@ -1,5 +1,6 @@
 use crate::sym::{Literal, Punctuation};
 use crate::tokenizer::{Keyword, Pos, Sym, Token, Tokenizer};
+use pretty_assertions::assert_eq;
 
 #[test]
 fn tokenize_simple_expr() {
@@ -131,4 +132,22 @@ fn tokenize_simple_expr() {
     let tokens = tokenizer.tokenize().unwrap();
 
     assert_eq!(expected, tokens);
+}
+
+#[test]
+fn test_token_number() {
+    let tokenizer = Tokenizer { query: "1234" };
+    let expected = vec![
+        Token {
+            item: Sym::Literal(Literal::Number(1234)),
+            pos: Pos { line: 1, column: 1 },
+        },
+        Token {
+            item: Sym::EOF,
+            pos: Pos { line: 1, column: 5 },
+        },
+    ];
+
+    let actual = tokenizer.tokenize().unwrap();
+    assert_eq!(expected, actual);
 }

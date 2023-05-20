@@ -136,6 +136,39 @@ impl<'a> Tokenizer<'a> {
                     Ok(Some(Sym::Newline))
                 }
 
+                '\'' => {
+                    let char = if let Some(c) = chars.next() {
+                        c
+                    } else {
+                        return Err(TokenizerError {
+                            message: "Expected a char but reached the end of the file".to_string(),
+                            pos: chars.pos(),
+                        });
+                    };
+
+                    let pos = chars.pos();
+                    let end = chars.next();
+
+                    if let Some(end) = end {
+                        if end != '\'' {
+                            return Err(TokenizerError {
+                                message: format!(
+                                    "Expected ' when parsing a char but got '{}' instead",
+                                    end
+                                ),
+                                pos,
+                            });
+                        }
+                    } else {
+                        return Err(TokenizerError {
+                            message: "Expected ' but reached the end of the file".to_string(),
+                            pos: chars.pos(),
+                        });
+                    }
+
+                    Ok(Some(Sym::Literal(Literal::Char(char))))
+                }
+
                 '?' => self.consume(chars, Sym::Punctuation(Punctuation::QuestionMark)),
                 '.' => self.consume(chars, Sym::Punctuation(Punctuation::Dot)),
                 '^' => self.consume(chars, Sym::Punctuation(Punctuation::Caret)),
@@ -264,6 +297,41 @@ impl<'a> Tokenizer<'a> {
                     }
 
                     Ok(Some(Sym::Type(ident)))
+                }
+
+                _ if ch.is_ascii_digit() => {
+                    let mut num = String::new();
+
+                    num.push(*ch);
+                    chars.next();
+
+                    while let Some(ch) = chars.peek() {
+                        if *ch == ' ' {
+                            break;
+                        }
+
+                        if !ch.is_ascii_digit() {
+                            return Err(TokenizerError {
+                                message: format!("Unexpected symbol when parsing number '{}'", ch),
+                                pos: chars.pos(),
+                            });
+                        }
+
+                        num.push(*ch);
+                        chars.next();
+                    }
+
+                    let num = match num.parse::<u64>() {
+                        Ok(num) => num,
+                        Err(e) => {
+                            return Err(TokenizerError {
+                                message: format!("Error when parsing natural number: {}", e),
+                                pos: chars.pos(),
+                            })
+                        }
+                    };
+
+                    Ok(Some(Sym::Literal(Literal::Number(num))))
                 }
 
                 _ => Err(TokenizerError {

@@ -38,7 +38,7 @@ impl Display for Keyword {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     /// An unsigned numeric literal
-    Number(String, bool),
+    Number(u64),
     /// Double quoted string: i.e: "string"
     String(String),
     Char(char),
@@ -48,11 +48,7 @@ pub enum Literal {
 impl Display for Literal {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            Literal::Number(s, sign) => {
-                let sign = if *sign { "-" } else { "" };
-                format!("{}{}", sign, s)
-            }
-
+            Literal::Number(num) => num.to_string(),
             Literal::String(s) => format!("\"{}\"", s),
             Literal::Char(c) => format!("'{}'", c),
             Literal::Bool(b) => b.to_string(),
