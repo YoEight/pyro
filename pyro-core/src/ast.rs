@@ -44,8 +44,18 @@ pub struct PatVar {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Val {
     Literal(Literal),
-    Path(VecDeque<String>),
+    Path(Vec<String>),
     Record(Record<Val>),
+}
+
+impl std::fmt::Display for Val {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Val::Literal(l) => write!(f, "{}", l),
+            Val::Path(p) => write!(f, "{}", p.join(".")),
+            Val::Record(r) => write!(f, "{}", r),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -62,9 +72,30 @@ pub enum Type {
     Record(Record<Type>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Record<A> {
     pub props: VecDeque<Prop<A>>,
+}
+
+impl<A> std::fmt::Display for Record<A>
+where
+    A: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+
+        let mut first = true;
+        for prop in &self.props {
+            if first {
+                first = false;
+                write!(f, ", ")?;
+            }
+
+            write!(f, "{}", prop)?;
+        }
+
+        write!(f, "]")
+    }
 }
 
 impl<A> Record<A> {
@@ -80,12 +111,38 @@ impl<A> Record<A> {
 
         Record { props }
     }
+
+    pub fn traverse_result<F, B, E>(self, fun: F) -> Result<Record<B>, E>
+    where
+        F: Fn(A) -> Result<B, E>,
+    {
+        let mut props = VecDeque::new();
+
+        for prop in self.props {
+            props.push_back(prop.traverse_result(&fun)?);
+        }
+
+        Ok(Record { props })
+    }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Prop<A> {
     pub label: Option<String>,
     pub val: A,
+}
+
+impl<A> std::fmt::Display for Prop<A>
+where
+    A: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(label) = self.label.as_ref() {
+            write!(f, "{}: ", label)?;
+        }
+
+        write!(f, "{}", self.val)
+    }
 }
 
 impl<A> Prop<A> {
@@ -97,6 +154,18 @@ impl<A> Prop<A> {
             val: fun(self.val),
             label: self.label,
         }
+    }
+
+    pub fn traverse_result<F, B, E>(self, fun: F) -> Result<Prop<B>, E>
+    where
+        F: FnOnce(A) -> Result<B, E>,
+    {
+        let val = fun(self.val)?;
+
+        Ok(Prop {
+            val,
+            label: self.label,
+        })
     }
 }
 

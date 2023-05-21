@@ -12,5 +12,9 @@ path = "../pyro-core"
 version = "4.3"
 features = ["derive"]
 
+[dependencies.tokio]
+version = "1"
+features = ["full"]
+
 [dependencies]
 eyre = "0.6"

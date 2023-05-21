@@ -249,9 +249,9 @@ impl<'a> ParserState<'a> {
     }
 
     pub fn parse_path(&mut self, start: Pos, head: String) -> Result<Tag<Val, Pos>> {
-        let mut path = VecDeque::new();
+        let mut path = Vec::new();
 
-        path.push_back(head);
+        path.push(head);
 
         loop {
             if !self.next_punct(Punctuation::Dot) {
@@ -262,7 +262,7 @@ impl<'a> ParserState<'a> {
             let token = self.shift();
 
             match &token.item {
-                Sym::Id(id) => path.push_back(id.clone()),
+                Sym::Id(id) => path.push(id.clone()),
                 _ => {
                     return Err(Error {
                         pos: token.pos,
