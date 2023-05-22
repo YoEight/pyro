@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use pyro_core::ast::{Pat, Proc, Record, Tag, Type, Val};
+use pyro_core::ast::{Abs, Pat, Proc, Record, Tag, Type, Val};
 use pyro_core::sym::Literal;
 use pyro_core::tokenizer::Pos;
 use tokio::sync::{mpsc, Mutex};
@@ -77,7 +77,7 @@ async fn execute_output(
     let value = resolve(scope, param.item)?;
     let value_type = value.r#type();
 
-    if value_type != typ {
+    if value_type.typecheck(&typ) {
         eyre::bail!(
             "{}:{}: Type mismatch, expected channel type to be {} but got {} instead",
             pos.line,
@@ -95,12 +95,13 @@ async fn execute_output(
 async fn execute_input(
     scope: &Scope,
     source: Tag<Val, Pos>,
-    abs: Tag<pyro_core::ast::Abs<Pos>, Pos>,
+    abs: Tag<Abs<Pos>, Pos>,
 ) -> eyre::Result<()> {
-    let source = if let Val::Path(path) = &source.item {
+    let pos = source.tag;
+    let (typ, source) = if let Val::Path(path) = &source.item {
         let id = build_var_id(path.as_slice());
-        if let RuntimeValue::Channel(_, chan) = scope.look_up(&id)? {
-            chan.input.clone()
+        if let RuntimeValue::Channel(typ, chan) = scope.look_up(&id)? {
+            (typ.clone(), chan.input.clone())
         } else {
             eyre::bail!("'{}' is not an output", id);
         }
@@ -119,11 +120,29 @@ async fn execute_input(
         };
 
         if let Some(value) = value {
-            update_scope(&mut scope, &value, abs.item.pattern);
+            let value_type = value.r#type();
+            if !value_type.typecheck(&typ) {
+                eyre::bail!(
+                    "{}:{}: Type mismatch, expected channel type to be {} but got {} instead",
+                    pos.line,
+                    pos.column,
+                    typ,
+                    value_type,
+                );
+            }
+
+            update_scope(&mut scope, &value, abs.item.pattern.clone());
+            execute_abs(&mut scope, abs).await?;
         }
+
+        Ok(())
     });
 
     Ok(())
+}
+
+async fn execute_abs(scope: &mut Scope, abs: Tag<Abs<Pos>, Pos>) -> eyre::Result<()> {
+    todo!()
 }
 
 fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat) {
@@ -135,8 +154,26 @@ fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat) {
                 update_scope(scope, value, *pattern.clone());
             }
         }
-        Pat::Record(_) => todo!(),
-        Pat::Wildcard(_) => todo!(),
+
+        Pat::Record(rec) => {
+            // We already typecheck at that level so it's safe to assume that
+            // the runtime value is indeed a record that is comprises of all the
+            // properties that we need.
+            if let RuntimeValue::Record(src) = value {
+                for (pat, value) in rec.props.iter().zip(src.props.iter()) {
+                    update_scope(scope, &value.val, pat.val.clone());
+
+                    if let Some(name) = &pat.label {
+                        scope.insert(name.clone(), value.val.clone());
+                    }
+                }
+            }
+        }
+
+        Pat::Wildcard(_) => {
+            // We do nothing as wildcard is meant to not pollute the scope with
+            // variable we are not going to use!
+        }
     }
 }
 
