@@ -6,13 +6,13 @@ pub struct Program<A> {
     pub procs: VecDeque<Tag<Proc<A>, A>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Tag<I, A> {
     pub item: I,
     pub tag: A,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Proc<A> {
     Output(Tag<Val, A>, Tag<Val, A>),
     Input(Tag<Val, A>, Tag<Abs<A>, A>),
@@ -22,7 +22,7 @@ pub enum Proc<A> {
     Cond(Tag<Val, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Abs<A> {
     pub pattern: Pat,
     pub proc: Box<Proc<A>>,
@@ -41,7 +41,7 @@ pub struct PatVar {
     pub pattern: Option<Box<Pat>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Val {
     Literal(Literal),
     Path(Vec<String>),
@@ -80,6 +80,14 @@ impl Type {
 
         self == other
     }
+
+    pub fn inner_type(&self) -> Type {
+        if let Type::Channel(typ) = self {
+            return *typ.clone();
+        }
+
+        self.clone()
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -95,7 +103,7 @@ impl std::fmt::Display for Type {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Record<A> {
-    pub props: VecDeque<Prop<A>>,
+    pub props: Vec<Prop<A>>,
 }
 
 impl<A> std::fmt::Display for Record<A>
@@ -128,7 +136,7 @@ impl<A> Record<A> {
             .props
             .into_iter()
             .map(move |p| p.map(&fun))
-            .collect::<VecDeque<_>>();
+            .collect::<Vec<_>>();
 
         Record { props }
     }
@@ -137,10 +145,10 @@ impl<A> Record<A> {
     where
         F: Fn(A) -> Result<B, E>,
     {
-        let mut props = VecDeque::new();
+        let mut props = Vec::new();
 
         for prop in self.props {
-            props.push_back(prop.traverse_result(&fun)?);
+            props.push(prop.traverse_result(&fun)?);
         }
 
         Ok(Record { props })
@@ -203,13 +211,13 @@ impl<A> Prop<A> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Def<A> {
     pub name: String,
     pub abs: Abs<A>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl<A> {
     Channel(String, Type),
     Def(VecDeque<Def<A>>),

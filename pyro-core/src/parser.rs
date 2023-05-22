@@ -285,7 +285,7 @@ impl<'a> ParserState<'a> {
         self.expect_punctuation(Punctuation::LBracket)?;
         self.skip_whitespace();
 
-        let mut props = VecDeque::new();
+        let mut props = Vec::new();
 
         loop {
             if self.next_punct(Punctuation::RBracket) {
@@ -297,7 +297,7 @@ impl<'a> ParserState<'a> {
             let value = kind.parse_value(self)?;
 
             self.skip_whitespace();
-            props.push_back(Prop { label, val: value });
+            props.push(Prop { label, val: value });
         }
 
         Ok(Record { props })
