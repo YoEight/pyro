@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
 
+use crate::ast::Type;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Keyword {
     New,
@@ -43,6 +45,28 @@ pub enum Literal {
     String(String),
     Char(char),
     Bool(bool),
+}
+
+impl Literal {
+    pub fn typematch(&self, r#type: &Type) -> bool {
+        match (self, r#type) {
+            (Literal::Number(_), Type::Name(name)) => name == "Int",
+            (Literal::String(_), Type::Name(name)) => name == "String",
+            (Literal::Char(_), Type::Name(name)) => name == "Char",
+            (Literal::Bool(_), Type::Name(name)) => name == "Bool",
+            (_, Type::Anonymous) => true,
+            _ => false,
+        }
+    }
+
+    pub fn r#type(&self) -> Type {
+        match self {
+            Literal::Number(_) => Type::Name("Int".to_string()),
+            Literal::String(_) => Type::Name("String".to_string()),
+            Literal::Char(_) => Type::Name("Char".to_string()),
+            Literal::Bool(_) => Type::Name("Bool".to_string()),
+        }
+    }
 }
 
 impl Display for Literal {

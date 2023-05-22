@@ -28,14 +28,14 @@ pub struct Abs<A> {
     pub proc: Box<Proc<A>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Pat {
     Var(PatVar),
     Record(Record<Pat>),
     Wildcard(Type),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PatVar {
     pub var: Var,
     pub pattern: Option<Box<Pat>>,
@@ -58,18 +58,29 @@ impl std::fmt::Display for Val {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Var {
     pub id: String,
     pub r#type: Type,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     Name(String),
     Channel(Box<Type>),
     Anonymous,
     Record(Record<Type>),
+}
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Name(n) => write!(f, "{}", n),
+            Type::Channel(t) => write!(f, "^{}", t),
+            Type::Anonymous => write!(f, "<anonymous>"), // TODO - we could implement universal type.
+            Type::Record(r) => write!(f, "{}", r),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -123,6 +134,19 @@ impl<A> Record<A> {
         }
 
         Ok(Record { props })
+    }
+
+    pub fn fold<B, F>(&self, def: B, fun: F) -> B
+    where
+        F: Fn(&A, B) -> B,
+    {
+        let mut acc = def;
+
+        for prop in &self.props {
+            acc = fun(&prop.val, acc);
+        }
+
+        acc
     }
 }
 
