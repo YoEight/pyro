@@ -91,7 +91,12 @@ async fn execute(_runtime: Runtime, progs: VecDeque<Tag<Proc<Pos>, Pos>>) -> eyr
                     gauge += 1;
                 }
 
-                Msg::Completed => gauge -= 1,
+                Msg::Completed => {
+                    gauge -= 1;
+                    if gauge <= 0 {
+                        break;
+                    }
+                }
             }
         }
     });
