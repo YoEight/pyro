@@ -96,81 +96,96 @@ fn test_parse_parallel() {
         procs: vec![Tag {
             item: Proc::Parallel(
                 vec![
-                    Proc::Input(
-                        Tag {
-                            item: Val::Path(vec!["a".to_string()].into()),
-                            tag: Pos { line: 1, column: 7 },
-                        },
-                        Tag {
-                            item: Abs {
-                                pattern: Pat::Var(PatVar {
-                                    var: Var {
-                                        id: "b".to_string(),
-                                        r#type: Type::Anonymous,
-                                    },
-                                    pattern: None,
-                                }),
-                                proc: Box::new(Proc::Output(
-                                    Tag {
-                                        item: Val::Path(vec!["x".to_string()].into()),
-                                        tag: Pos {
-                                            line: 1,
-                                            column: 13,
+                    Tag {
+                        tag: Pos { line: 1, column: 7 },
+                        item: Proc::Input(
+                            Tag {
+                                item: Val::Path(vec!["a".to_string()].into()),
+                                tag: Pos { line: 1, column: 7 },
+                            },
+                            Tag {
+                                item: Abs {
+                                    pattern: Pat::Var(PatVar {
+                                        var: Var {
+                                            id: "b".to_string(),
+                                            r#type: Type::Anonymous,
                                         },
-                                    },
-                                    Tag {
-                                        item: Val::Path(vec!["y".to_string()].into()),
-                                        tag: Pos {
-                                            line: 1,
-                                            column: 15,
+                                        pattern: None,
+                                    }),
+                                    proc: Box::new(Proc::Output(
+                                        Tag {
+                                            item: Val::Path(vec!["x".to_string()].into()),
+                                            tag: Pos {
+                                                line: 1,
+                                                column: 13,
+                                            },
                                         },
-                                    },
-                                )),
+                                        Tag {
+                                            item: Val::Path(vec!["y".to_string()].into()),
+                                            tag: Pos {
+                                                line: 1,
+                                                column: 15,
+                                            },
+                                        },
+                                    )),
+                                },
+                                tag: Pos { line: 1, column: 9 },
                             },
-                            tag: Pos { line: 1, column: 9 },
+                        ),
+                    },
+                    Tag {
+                        tag: Pos {
+                            line: 1,
+                            column: 19,
                         },
-                    ),
-                    Proc::Input(
-                        Tag {
-                            item: Val::Path(vec!["c".to_string()].into()),
-                            tag: Pos {
-                                line: 1,
-                                column: 19,
+                        item: Proc::Input(
+                            Tag {
+                                item: Val::Path(vec!["c".to_string()].into()),
+                                tag: Pos {
+                                    line: 1,
+                                    column: 19,
+                                },
                             },
+                            Tag {
+                                item: Abs {
+                                    pattern: Pat::Var(PatVar {
+                                        var: Var {
+                                            id: "d".to_string(),
+                                            r#type: Type::Anonymous,
+                                        },
+                                        pattern: None,
+                                    }),
+                                    proc: Box::new(Proc::Null),
+                                },
+                                tag: Pos {
+                                    line: 1,
+                                    column: 21,
+                                },
+                            },
+                        ),
+                    },
+                    Tag {
+                        tag: Pos {
+                            line: 1,
+                            column: 30,
                         },
-                        Tag {
-                            item: Abs {
-                                pattern: Pat::Var(PatVar {
-                                    var: Var {
-                                        id: "d".to_string(),
-                                        r#type: Type::Anonymous,
-                                    },
-                                    pattern: None,
-                                }),
-                                proc: Box::new(Proc::Null),
+                        item: Proc::Output(
+                            Tag {
+                                item: Val::Path(vec!["e".to_string()].into()),
+                                tag: Pos {
+                                    line: 1,
+                                    column: 30,
+                                },
                             },
-                            tag: Pos {
-                                line: 1,
-                                column: 21,
+                            Tag {
+                                item: Val::Path(vec!["f".to_string()].into()),
+                                tag: Pos {
+                                    line: 1,
+                                    column: 32,
+                                },
                             },
-                        },
-                    ),
-                    Proc::Output(
-                        Tag {
-                            item: Val::Path(vec!["e".to_string()].into()),
-                            tag: Pos {
-                                line: 1,
-                                column: 30,
-                            },
-                        },
-                        Tag {
-                            item: Val::Path(vec!["f".to_string()].into()),
-                            tag: Pos {
-                                line: 1,
-                                column: 32,
-                            },
-                        },
-                    ),
+                        ),
+                    },
                 ]
                 .into(),
             ),

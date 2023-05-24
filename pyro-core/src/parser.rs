@@ -455,6 +455,7 @@ impl<'a> ParserState<'a> {
     }
 
     fn parse_local_decl(&mut self) -> Result<Proc<Pos>> {
+        let decl_pos = self.pos();
         let decl = self.parse_decl()?;
 
         self.skip_spaces();
@@ -465,7 +466,10 @@ impl<'a> ParserState<'a> {
         self.expect_punctuation(Punctuation::RParen)?;
 
         Ok(Proc::Decl(
-            decl,
+            Tag {
+                item: decl,
+                tag: decl_pos,
+            },
             Tag {
                 item: Box::new(proc),
                 tag: pos,
@@ -497,7 +501,11 @@ impl<'a> ParserState<'a> {
     fn parse_parallel_composition(&mut self) -> Result<Proc<Pos>> {
         let mut processes = VecDeque::new();
 
-        processes.push_back(self.parse_proc()?);
+        let pos = self.pos();
+        processes.push_back(Tag {
+            item: self.parse_proc()?,
+            tag: pos,
+        });
 
         self.skip_whitespace();
         let mut first_time = true;
@@ -511,7 +519,11 @@ impl<'a> ParserState<'a> {
             if self.next_punct(Punctuation::Pipe) {
                 self.shift();
                 self.skip_whitespace();
-                processes.push_back(self.parse_proc()?);
+                let pos = self.pos();
+                processes.push_back(Tag {
+                    item: self.parse_proc()?,
+                    tag: pos,
+                });
                 self.skip_whitespace();
                 first_time = false;
                 continue;

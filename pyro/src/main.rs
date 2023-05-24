@@ -133,13 +133,13 @@ async fn execute_proc(mut scope: Scope, proc: Proc<Pos>) -> eyre::Result<Vec<Sus
             for proc in procs {
                 sus.push(Suspend {
                     scope: scope.clone(),
-                    proc,
+                    proc: proc.item,
                 });
             }
         }
 
         Proc::Decl(decl, proc) => {
-            scope.register(decl);
+            scope.register(decl.item);
             sus.push(Suspend {
                 scope,
                 proc: *proc.item,

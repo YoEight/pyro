@@ -12,13 +12,25 @@ pub struct Tag<I, A> {
     pub tag: A,
 }
 
+impl<I, A> Tag<I, A> {
+    pub fn map_item<F, J>(self, fun: F) -> Tag<J, A>
+    where
+        F: FnOnce(I) -> J,
+    {
+        Tag {
+            item: fun(self.item),
+            tag: self.tag,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Proc<A> {
     Output(Tag<Val, A>, Tag<Val, A>),
     Input(Tag<Val, A>, Tag<Abs<A>, A>),
     Null, // ()
-    Parallel(VecDeque<Proc<A>>),
-    Decl(Decl<A>, Tag<Box<Proc<A>>, A>),
+    Parallel(VecDeque<Tag<Proc<A>, A>>),
+    Decl(Tag<Decl<A>, A>, Tag<Box<Proc<A>>, A>),
     Cond(Tag<Val, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
 }
 
