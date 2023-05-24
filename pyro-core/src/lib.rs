@@ -4,7 +4,7 @@ use ast::{Proc, Tag};
 use parser::Parser;
 use tokenizer::{Pos, Token, Tokenizer};
 
-// pub mod annotate;
+pub mod annotate;
 pub mod ast;
 pub mod parser;
 pub mod sym;

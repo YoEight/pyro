@@ -409,12 +409,16 @@ impl<'a> ParserState<'a> {
         self.expect(Sym::Eq)?;
         self.skip_whitespace();
 
+        let proc_pos = self.pos();
         let proc = self.parse_proc()?;
 
         Ok(Tag {
             item: Abs {
                 pattern,
-                proc: Box::new(proc),
+                proc: Box::new(Tag {
+                    item: proc,
+                    tag: proc_pos,
+                }),
             },
             tag: pos,
         })

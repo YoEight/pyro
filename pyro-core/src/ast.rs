@@ -37,7 +37,7 @@ pub enum Proc<A> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Abs<A> {
     pub pattern: Pat,
-    pub proc: Box<Proc<A>>,
+    pub proc: Box<Tag<Proc<A>, A>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

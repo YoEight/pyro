@@ -244,7 +244,7 @@ async fn execute_input(
 
         return Ok(Some(Suspend {
             scope: scope.clone(),
-            proc: *abs.item.proc,
+            proc: abs.item.proc.item,
         }));
     }
 
