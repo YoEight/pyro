@@ -1,6 +1,6 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::ast::{Abs, Decl};
+use crate::ast::{Abs, Decl, Def};
 use crate::{
     ast::{Proc, Program, Tag, Val},
     tokenizer::Pos,
@@ -81,13 +81,22 @@ fn annotate_proc(proc: Tag<Proc<Pos>, Pos>) -> Tag<Proc<Ann>, Ann> {
         },
 
         Proc::Parallel(ps) => {
+            let mut ann = Ann::new(proc.tag);
             let ps = ps
                 .into_iter()
-                .map(|p| annotate_proc(p))
-                .collect::<VecDeque<_>>();
+                .map(|p| {
+                    let proc = annotate_proc(p);
+                    for var in &proc.tag.free_variables {
+                        ann.free_variables.insert(var.clone());
+                    }
+                    proc
+                })
+                .collect::<Vec<_>>();
 
-            // Proc::Parallel(ps)
-            todo!()
+            Tag {
+                item: Proc::Parallel(ps),
+                tag: ann,
+            }
         }
 
         Proc::Decl(d, p) => {
@@ -108,20 +117,45 @@ fn annotate_proc(proc: Tag<Proc<Pos>, Pos>) -> Tag<Proc<Ann>, Ann> {
 
 fn annotate_abs(tag: Tag<Abs<Pos>, Pos>) -> Tag<Abs<Ann>, Ann> {
     let proc = annotate_proc(*tag.item.proc);
+    let mut ann = proc.tag.clone();
+
+    ann.pos = tag.tag;
+
     Tag {
         item: Abs {
             pattern: tag.item.pattern,
             proc: Box::new(proc),
         },
-        tag: Ann {
-            pos: tag.tag,
-            free_variables: Default::default(),
-        },
+        tag: ann,
     }
 }
 
 fn annotate_decl(decl: Tag<Decl<Pos>, Pos>) -> Tag<Decl<Ann>, Ann> {
-    todo!()
+    let mut ann = Ann::new(decl.tag);
+    let item = match decl.item {
+        Decl::Channel(n, t) => Decl::Channel(n, t),
+        Decl::Type(n, t) => Decl::Type(n, t),
+
+        Decl::Def(defs) => {
+            let mut new_defs = Vec::new();
+            for def in defs {
+                let abs = annotate_abs(def.abs);
+
+                for var in &abs.tag.free_variables {
+                    ann.free_variables.insert(var.clone());
+                }
+
+                new_defs.push(Def {
+                    name: def.name,
+                    abs,
+                });
+            }
+
+            Decl::Def(new_defs)
+        }
+    };
+
+    Tag { item, tag: ann }
 }
 
 fn annotate_val(lit: Tag<Val, Pos>) -> Tag<Val, Ann> {

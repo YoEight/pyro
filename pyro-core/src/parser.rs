@@ -503,10 +503,10 @@ impl<'a> ParserState<'a> {
     }
 
     fn parse_parallel_composition(&mut self) -> Result<Proc<Pos>> {
-        let mut processes = VecDeque::new();
+        let mut processes = Vec::new();
 
         let pos = self.pos();
-        processes.push_back(Tag {
+        processes.push(Tag {
             item: self.parse_proc()?,
             tag: pos,
         });
@@ -524,7 +524,7 @@ impl<'a> ParserState<'a> {
                 self.shift();
                 self.skip_whitespace();
                 let pos = self.pos();
-                processes.push_back(Tag {
+                processes.push(Tag {
                     item: self.parse_proc()?,
                     tag: pos,
                 });
@@ -549,7 +549,7 @@ impl<'a> ParserState<'a> {
         self.expect_keyword(Keyword::Def)?;
         self.skip_whitespace();
 
-        let mut defs = VecDeque::new();
+        let mut defs = Vec::new();
 
         loop {
             let id = self.parse_id()?;
@@ -557,10 +557,7 @@ impl<'a> ParserState<'a> {
             let abs = self.parse_abs()?;
             self.skip_spaces();
 
-            defs.push_back(Def {
-                name: id,
-                abs: abs.item,
-            });
+            defs.push(Def { name: id, abs });
 
             if !self.next_keyword(Keyword::And) {
                 break;

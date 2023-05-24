@@ -29,7 +29,7 @@ pub enum Proc<A> {
     Output(Tag<Val, A>, Tag<Val, A>),
     Input(Tag<Val, A>, Tag<Abs<A>, A>),
     Null, // ()
-    Parallel(VecDeque<Tag<Proc<A>, A>>),
+    Parallel(Vec<Tag<Proc<A>, A>>),
     Decl(Tag<Decl<A>, A>, Tag<Box<Proc<A>>, A>),
     Cond(Tag<Val, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
 }
@@ -226,12 +226,12 @@ impl<A> Prop<A> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Def<A> {
     pub name: String,
-    pub abs: Abs<A>,
+    pub abs: Tag<Abs<A>, A>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl<A> {
     Channel(String, Type),
-    Def(VecDeque<Def<A>>),
+    Def(Vec<Def<A>>),
     Type(String, Type),
 }
