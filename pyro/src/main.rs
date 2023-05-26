@@ -7,7 +7,7 @@ use clap::Parser;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Decl, Def, Pat, Proc, Record, Tag, Val};
 use pyro_core::sym::Literal;
-use pyro_core::tokenizer::Pos;
+use pyro_core::Pos;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{mpsc, Mutex};
 

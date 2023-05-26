@@ -2,37 +2,9 @@
 mod tests;
 
 use crate::sym::{Keyword, Literal, Punctuation, Sym};
-use std::fmt;
+use crate::{Error, Pos, Result};
 use std::iter::Peekable;
 use std::str::Chars;
-
-/// Tokenizer error
-#[derive(Debug, PartialEq, Eq)]
-pub struct TokenizerError {
-    pub message: String,
-    pub pos: Pos,
-}
-
-impl fmt::Display for TokenizerError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} at Line: {}, Column {}",
-            self.message, self.pos.line, self.pos.column
-        )
-    }
-}
-
-impl std::error::Error for TokenizerError {}
-
-/// Location in input string
-#[derive(Debug, Eq, PartialEq, Clone, Copy)]
-pub struct Pos {
-    /// Line number, starting from 1
-    pub line: u64,
-    /// Line column, starting from 1
-    pub column: u64,
-}
 
 struct State<'a> {
     peekable: Peekable<Chars<'a>>,
@@ -90,7 +62,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// Tokenize the statement and produce a vector of tokens with location information
-    pub fn tokenize(&self) -> Result<Vec<Token>, TokenizerError> {
+    pub fn tokenize(&self) -> Result<Vec<Token>> {
         let mut state = State {
             peekable: self.query.chars().peekable(),
             line: 1,
@@ -114,7 +86,7 @@ impl<'a> Tokenizer<'a> {
         Ok(tokens)
     }
 
-    fn next_token_item(&self, chars: &mut State) -> Result<Option<Sym>, TokenizerError> {
+    fn next_token_item(&self, chars: &mut State) -> Result<Option<Sym>> {
         match chars.peek() {
             None => Ok(None),
             Some(ch) => match ch {
@@ -140,7 +112,7 @@ impl<'a> Tokenizer<'a> {
                     let char = if let Some(c) = chars.next() {
                         c
                     } else {
-                        return Err(TokenizerError {
+                        return Err(Error {
                             message: "Expected a char but reached the end of the file".to_string(),
                             pos: chars.pos(),
                         });
@@ -151,7 +123,7 @@ impl<'a> Tokenizer<'a> {
 
                     if let Some(end) = end {
                         if end != '\'' {
-                            return Err(TokenizerError {
+                            return Err(Error {
                                 message: format!(
                                     "Expected ' when parsing a char but got '{}' instead",
                                     end
@@ -160,7 +132,7 @@ impl<'a> Tokenizer<'a> {
                             });
                         }
                     } else {
-                        return Err(TokenizerError {
+                        return Err(Error {
                             message: "Expected ' but reached the end of the file".to_string(),
                             pos: chars.pos(),
                         });
@@ -225,7 +197,7 @@ impl<'a> Tokenizer<'a> {
                         }
 
                         if *ch == '\n' {
-                            return Err(TokenizerError {
+                            return Err(Error {
                                 message: "String literal is malformed".to_string(),
                                 pos: chars.pos(),
                             });
@@ -235,7 +207,7 @@ impl<'a> Tokenizer<'a> {
                         chars.next();
                     }
 
-                    Err(TokenizerError {
+                    Err(Error {
                         message: "Incomplete string literal".to_string(),
                         pos: chars.pos(),
                     })
@@ -311,7 +283,7 @@ impl<'a> Tokenizer<'a> {
                         }
 
                         if !ch.is_ascii_digit() {
-                            return Err(TokenizerError {
+                            return Err(Error {
                                 message: format!("Unexpected symbol when parsing number '{}'", ch),
                                 pos: chars.pos(),
                             });
@@ -324,7 +296,7 @@ impl<'a> Tokenizer<'a> {
                     let num = match num.parse::<u64>() {
                         Ok(num) => num,
                         Err(e) => {
-                            return Err(TokenizerError {
+                            return Err(Error {
                                 message: format!("Error when parsing natural number: {}", e),
                                 pos: chars.pos(),
                             })
@@ -334,7 +306,7 @@ impl<'a> Tokenizer<'a> {
                     Ok(Some(Sym::Literal(Literal::Number(num))))
                 }
 
-                _ => Err(TokenizerError {
+                _ => Err(Error {
                     message: format!("Unexpected symbol '{}'", ch),
                     pos: chars.pos(),
                 }),
@@ -342,7 +314,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    fn consume(&self, chars: &mut State, item: Sym) -> Result<Option<Sym>, TokenizerError> {
+    fn consume(&self, chars: &mut State, item: Sym) -> Result<Option<Sym>> {
         chars.next();
         Ok(Some(item))
     }

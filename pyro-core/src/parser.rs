@@ -3,25 +3,10 @@ mod tests;
 
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
 use crate::sym::{Keyword, Punctuation, Sym};
-use crate::tokenizer::{Pos, Token};
+use crate::tokenizer::Token;
+use crate::{Error, Pos, Result};
 use std::iter::Peekable;
 use std::slice::Iter;
-
-#[derive(Clone, Debug)]
-pub struct Error {
-    pos: Pos,
-    message: String,
-}
-
-impl std::error::Error for Error {}
-
-pub type Result<A> = std::result::Result<A, Error>;
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}: {}", self.pos.line, self.pos.column, self.message)
-    }
-}
 
 pub trait RecordKind {
     type Value;
