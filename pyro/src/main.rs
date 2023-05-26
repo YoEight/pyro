@@ -158,8 +158,8 @@ async fn execute_proc(mut scope: Scope, proc: Proc<Ann>) -> eyre::Result<Vec<Sus
 
 fn execute_output(
     scope: &mut Scope,
-    target: Tag<Val, Ann>,
-    param: Tag<Val, Ann>,
+    target: Tag<Val<Ann>, Ann>,
+    param: Tag<Val<Ann>, Ann>,
 ) -> eyre::Result<()> {
     let pos = target.tag.pos;
     let target_type = target.tag.r#type;
@@ -199,7 +199,7 @@ fn execute_output(
 
 async fn execute_input(
     scope: &mut Scope,
-    source: Tag<Val, Ann>,
+    source: Tag<Val<Ann>, Ann>,
     abs: Tag<Abs<Ann>, Ann>,
 ) -> eyre::Result<Option<Suspend>> {
     let source = if let Val::Path(path) = &source.item {
@@ -220,7 +220,7 @@ async fn execute_input(
 
     let mut recv = source.lock().await;
     if let Some(value) = recv.recv().await {
-        update_scope(scope, &value, abs.item.pattern.clone());
+        update_scope(scope, &value, abs.item.pattern.item.clone());
 
         return Ok(Some(Suspend {
             scope: scope.clone(),
@@ -231,7 +231,7 @@ async fn execute_input(
     Ok(None)
 }
 
-fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat) {
+fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat<Ann>) {
     match pattern {
         Pat::Var(var) => {
             scope.insert(var.var.id, value.clone());
@@ -247,7 +247,7 @@ fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat) {
             // properties that we need.
             if let RuntimeValue::Record(src) = value {
                 for (pat, value) in rec.props.iter().zip(src.props.iter()) {
-                    update_scope(scope, &value.val, pat.val.clone());
+                    update_scope(scope, &value.val, pat.val.item.clone());
 
                     if let Some(name) = &pat.label {
                         scope.insert(name.clone(), value.val.clone());
@@ -263,12 +263,12 @@ fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat) {
     }
 }
 
-fn resolve(scope: &mut Scope, value: Val) -> eyre::Result<RuntimeValue> {
+fn resolve(scope: &mut Scope, value: Val<Ann>) -> eyre::Result<RuntimeValue> {
     match value {
         Val::Literal(l) => Ok(RuntimeValue::Literal(l.clone())),
         Val::Path(paths) => scope.take(&build_var_id(&paths)),
         Val::Record(r) => Ok(RuntimeValue::Record(
-            r.traverse_result(|v| resolve(scope, v))?,
+            r.traverse_result(|v| resolve(scope, v.item))?,
         )),
     }
 }

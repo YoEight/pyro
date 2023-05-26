@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ast::{Abs, Decl, Def, Pat, Prop, Record, Type};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Type};
 use crate::ast::{Proc, Program, Tag, Val};
 use crate::sym::Literal;
 use crate::Result;
@@ -78,7 +78,7 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
 
         Proc::Input(l, r) => {
             let l = annotate_val_input(&mut ctx, l)?;
-            let (pat_type, r) = annotate_abs(&ctx, r)?;
+            let (pat_type, r) = annotate_abs(&mut ctx, r)?;
 
             if !l.tag.r#type.is_channel() {
                 return Err(Error {
@@ -146,18 +146,18 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
     }
 }
 
-fn annotate_abs(ctx: &Ctx, tag: Tag<Abs<Pos>, Pos>) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
+fn annotate_abs(ctx: &mut Ctx, tag: Tag<Abs<Pos>, Pos>) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
+    let pattern = annotate_pattern(ctx, tag.item.pattern)?;
     let proc = annotate_proc(ctx.clone(), *tag.item.proc)?;
     let mut ann = proc.tag.clone();
-    let pat_type = pattern_type(ctx, &tag.item.pattern);
 
     ann.pos = tag.tag;
 
     Ok((
-        pat_type,
+        pattern.tag.r#type.clone(),
         Tag {
             item: Abs {
-                pattern: tag.item.pattern,
+                pattern,
                 proc: Box::new(proc),
             },
             tag: ann,
@@ -183,7 +183,7 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
             for def in defs {
-                let (r#type, abs) = annotate_abs(&ctx, def.abs)?;
+                let (r#type, abs) = annotate_abs(ctx, def.abs)?;
 
                 ctx.variables
                     .insert(def.name.clone(), Type::Channel(Box::new(r#type)));
@@ -201,8 +201,8 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
     Ok(Tag { item, tag: ann })
 }
 
-fn annotate_val_input(ctx: &mut Ctx, lit: Tag<Val, Pos>) -> Result<Tag<Val, Ann>> {
-    match &lit.item {
+fn annotate_val_input(ctx: &mut Ctx, lit: Tag<Val<Pos>, Pos>) -> Result<Tag<Val<Ann>, Ann>> {
+    match lit.item {
         Val::Path(p) => {
             let name = p.first().unwrap();
             let r#type = if let Some(r#type) = ctx.variables.get(name) {
@@ -215,7 +215,7 @@ fn annotate_val_input(ctx: &mut Ctx, lit: Tag<Val, Pos>) -> Result<Tag<Val, Ann>
             };
 
             Ok(Tag {
-                item: lit.item,
+                item: Val::Path(p),
                 tag: Ann {
                     pos: lit.tag,
                     r#type: r#type.clone(),
@@ -236,29 +236,93 @@ fn literal_type(lit: &Literal) -> Type {
     }
 }
 
-fn pattern_type(ctx: &Ctx, pat: &Pat) -> Type {
-    match pat {
+fn annotate_pattern(ctx: &mut Ctx, tag: Tag<Pat<Pos>, Pos>) -> Result<Tag<Pat<Ann>, Ann>> {
+    match tag.item {
         Pat::Var(v) => {
-            if let Type::Anonymous = &v.var.r#type {
-                if let Some(inner) = &v.pattern {
-                    return pattern_type(ctx, inner);
-                }
-            }
+            let pat_tag = annotate_pat_var(ctx, tag.tag, v)?;
 
-            v.var.r#type.clone()
+            Ok(Tag {
+                item: Pat::Var(pat_tag.item),
+                tag: pat_tag.tag,
+            })
         }
 
         Pat::Record(rec) => {
-            let rec = rec.clone().map(|p| pattern_type(ctx, &p));
+            let mut props = Vec::new();
+            let mut props_type = Vec::new();
 
-            Type::Record(rec)
+            for prop in rec.props {
+                let val = annotate_pattern(ctx, prop.val)?;
+
+                props_type.push(Prop {
+                    label: prop.label.clone(),
+                    val: val.tag.r#type.clone(),
+                });
+
+                props.push(Prop {
+                    label: prop.label,
+                    val,
+                });
+            }
+
+            Ok(Tag {
+                item: Pat::Record(Record { props }),
+                tag: Ann {
+                    pos: tag.tag,
+                    r#type: Type::Record(Record { props: props_type }),
+                },
+            })
         }
 
-        Pat::Wildcard(t) => t.clone(),
+        Pat::Wildcard(t) => Ok(Tag {
+            item: Pat::Wildcard(t.clone()),
+            tag: Ann {
+                pos: tag.tag,
+                r#type: t,
+            },
+        }),
     }
 }
+fn annotate_pat_var(
+    ctx: &mut Ctx,
+    pos: Pos,
+    pat_var: PatVar<Pos>,
+) -> Result<Tag<PatVar<Ann>, Ann>> {
+    let (r#type, pattern) = if let Some(pat) = pat_var.pattern {
+        let param = Tag {
+            item: *pat,
+            tag: pos,
+        };
 
-fn annotate_val(ctx: &mut Ctx, lit: Tag<Val, Pos>) -> Result<Tag<Val, Ann>> {
+        let pat = annotate_pattern(ctx, param)?;
+
+        if pat_var.var.r#type != Type::Anonymous && !pat.tag.r#type.typecheck(&pat_var.var.r#type) {
+            return Err(Error {
+                pos,
+                message: format!(
+                    "Expected type '{}' but got '{}' instead",
+                    pat_var.var.r#type, pat.tag.r#type
+                ),
+            });
+        }
+
+        (pat.tag.r#type, Some(Box::new(pat.item)))
+    } else {
+        (pat_var.var.r#type.clone(), None)
+    };
+
+    ctx.variables.insert(pat_var.var.id.clone(), r#type.clone());
+
+    Ok(Tag {
+        item: PatVar {
+            var: pat_var.var,
+            pattern,
+        },
+        tag: Ann { pos, r#type },
+    })
+}
+
+fn annotate_val(ctx: &mut Ctx, lit: Tag<Val<Pos>, Pos>) -> Result<Tag<Val<Ann>, Ann>> {
     match lit.item {
         Val::Literal(l) => {
             let r#type = literal_type(&l);
@@ -318,29 +382,27 @@ fn annotate_val(ctx: &mut Ctx, lit: Tag<Val, Pos>) -> Result<Tag<Val, Ann>> {
             })
         }
 
-        // TODO - We should probably have tag at the record level too so if
-        // variable that doesn't exist is used, we can have good error message.
         Val::Record(xs) => {
             let mut props = Vec::new();
+            let mut types = Vec::new();
 
-            for prop in &xs.props {
-                // FIXME - See TODO above.
-                let tag = Tag {
-                    item: prop.val.clone(),
-                    tag: Pos { line: 1, column: 1 },
-                };
+            for prop in xs.props {
+                let val = annotate_val(ctx, prop.val)?;
 
-                let ann = annotate_val(ctx, tag)?;
+                types.push(Prop {
+                    label: prop.label.clone(),
+                    val: val.tag.r#type.clone(),
+                });
 
                 props.push(Prop {
-                    label: prop.label.clone(),
-                    val: ann.tag.r#type,
+                    label: prop.label,
+                    val,
                 });
             }
 
-            let ann = Ann::with_type(Type::Record(Record { props }), lit.tag);
+            let ann = Ann::with_type(Type::Record(Record { props: types }), lit.tag);
             Ok(Tag {
-                item: Val::Record(xs),
+                item: Val::Record(Record { props }),
                 tag: ann,
             })
         }

@@ -19,7 +19,7 @@ pub struct RecordType;
 pub struct RecordPat;
 
 impl RecordKind for RecordValue {
-    type Value = Val;
+    type Value = Val<Pos>;
 
     fn parse_value(&self, state: &mut ParserState) -> Result<Self::Value> {
         let tag = state.parse_value()?;
@@ -36,7 +36,7 @@ impl RecordKind for RecordType {
 }
 
 impl RecordKind for RecordPat {
-    type Value = Pat;
+    type Value = Pat<Pos>;
 
     fn parse_value(&self, state: &mut ParserState) -> Result<Self::Value> {
         state.parse_pat()
@@ -205,7 +205,7 @@ impl<'a> ParserState<'a> {
         return Ok(r#type);
     }
 
-    pub fn parse_value(&mut self) -> Result<Tag<Val, Pos>> {
+    pub fn parse_value(&mut self) -> Result<Tag<Val<Pos>, Pos>> {
         let token = self.look_ahead();
 
         match token.item() {
@@ -232,7 +232,7 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn parse_path(&mut self, start: Pos, head: String) -> Result<Tag<Val, Pos>> {
+    pub fn parse_path(&mut self, start: Pos, head: String) -> Result<Tag<Val<Pos>, Pos>> {
         let mut path = Vec::new();
 
         path.push(head);
@@ -262,7 +262,7 @@ impl<'a> ParserState<'a> {
         })
     }
 
-    pub fn parse_record<K>(&mut self, kind: K) -> Result<Record<K::Value>>
+    pub fn parse_record<K>(&mut self, kind: K) -> Result<Record<Tag<K::Value, Pos>>>
     where
         K: RecordKind,
     {
@@ -278,20 +278,27 @@ impl<'a> ParserState<'a> {
             }
 
             let label = self.parse_type_label()?;
+            let pos = self.pos();
             let value = kind.parse_value(self)?;
 
             self.skip_whitespace();
-            props.push(Prop { label, val: value });
+            props.push(Prop {
+                label,
+                val: Tag {
+                    item: value,
+                    tag: pos,
+                },
+            });
         }
 
         Ok(Record { props })
     }
 
     pub fn parse_record_type(&mut self) -> Result<Type> {
-        Ok(Type::Record(self.parse_record(RecordType)?))
+        Ok(Type::Record(self.parse_record(RecordType)?.map(|p| p.item)))
     }
 
-    pub fn parse_record_value(&mut self) -> Result<Tag<Val, Pos>> {
+    pub fn parse_record_value(&mut self) -> Result<Tag<Val<Pos>, Pos>> {
         let pos = self.pos();
         let record = self.parse_record(RecordValue)?;
 
@@ -301,7 +308,7 @@ impl<'a> ParserState<'a> {
         })
     }
 
-    pub fn parse_record_pat(&mut self) -> Result<Record<Pat>> {
+    pub fn parse_record_pat(&mut self) -> Result<Record<Tag<Pat<Pos>, Pos>>> {
         self.parse_record(RecordPat)
     }
 
@@ -398,7 +405,10 @@ impl<'a> ParserState<'a> {
 
         Ok(Tag {
             item: Abs {
-                pattern,
+                pattern: Tag {
+                    item: pattern,
+                    tag: pos,
+                },
                 proc: Box::new(Tag {
                     item: proc,
                     tag: proc_pos,
@@ -408,7 +418,7 @@ impl<'a> ParserState<'a> {
         })
     }
 
-    pub fn parse_pat(&mut self) -> Result<Pat> {
+    pub fn parse_pat(&mut self) -> Result<Pat<Pos>> {
         let token = self.look_ahead();
 
         match token.item() {

@@ -11,6 +11,15 @@ pub struct Tag<I, A> {
     pub tag: A,
 }
 
+impl<I, A> std::fmt::Display for Tag<I, A>
+where
+    I: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.item)
+    }
+}
+
 impl<I, A> Tag<I, A> {
     pub fn map_item<F, J>(self, fun: F) -> Tag<J, A>
     where
@@ -25,41 +34,41 @@ impl<I, A> Tag<I, A> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Proc<A> {
-    Output(Tag<Val, A>, Tag<Val, A>),
-    Input(Tag<Val, A>, Tag<Abs<A>, A>),
+    Output(Tag<Val<A>, A>, Tag<Val<A>, A>),
+    Input(Tag<Val<A>, A>, Tag<Abs<A>, A>),
     Null, // ()
     Parallel(Vec<Tag<Proc<A>, A>>),
     Decl(Tag<Decl<A>, A>, Tag<Box<Proc<A>>, A>),
-    Cond(Tag<Val, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
+    Cond(Tag<Val<A>, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Abs<A> {
-    pub pattern: Pat,
+    pub pattern: Tag<Pat<A>, A>,
     pub proc: Box<Tag<Proc<A>, A>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Pat {
-    Var(PatVar),
-    Record(Record<Pat>),
+pub enum Pat<A> {
+    Var(PatVar<A>),
+    Record(Record<Tag<Pat<A>, A>>),
     Wildcard(Type),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct PatVar {
+pub struct PatVar<A> {
     pub var: Var,
-    pub pattern: Option<Box<Pat>>,
+    pub pattern: Option<Box<Pat<A>>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Val {
+pub enum Val<A> {
     Literal(Literal),
     Path(Vec<String>),
-    Record(Record<Val>),
+    Record(Record<Tag<Val<A>, A>>),
 }
 
-impl std::fmt::Display for Val {
+impl<A> std::fmt::Display for Val<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Val::Literal(l) => write!(f, "{}", l),
@@ -136,11 +145,11 @@ where
 
         let mut first = true;
         for prop in &self.props {
-            if first {
-                first = false;
+            if !first {
                 write!(f, ", ")?;
             }
 
+            first = false;
             write!(f, "{}", prop)?;
         }
 
