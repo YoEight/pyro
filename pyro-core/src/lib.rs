@@ -1,8 +1,7 @@
-use std::collections::VecDeque;
-
+use crate::annotate::{annotate_program, Ann};
 use ast::{Proc, Tag};
 use parser::Parser;
-use tokenizer::{Pos, Token, Tokenizer};
+use tokenizer::{Token, Tokenizer};
 
 pub mod annotate;
 pub mod ast;
@@ -17,10 +16,10 @@ pub fn tokenize(src: &str) -> eyre::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-pub fn parse(src: &str) -> eyre::Result<VecDeque<Tag<Proc<Pos>, Pos>>> {
+pub fn parse(src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
     let tokens = tokenize(src)?;
     let parser = Parser::new(tokens.as_slice());
-    let program = parser.parse()?;
+    let program = annotate_program(parser.parse()?);
 
     Ok(program.procs)
 }

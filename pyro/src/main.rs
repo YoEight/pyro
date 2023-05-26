@@ -1,10 +1,11 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use pyro_core::ast::{Abs, Decl, Def, Pat, Proc, Record, Tag, Type, Val};
+use pyro_core::annotate::Ann;
+use pyro_core::ast::{Abs, Decl, Def, Pat, Proc, Record, Tag, Val};
 use pyro_core::sym::Literal;
 use pyro_core::tokenizer::Pos;
 use tokio::sync::mpsc::UnboundedSender;
@@ -29,9 +30,8 @@ async fn main() -> eyre::Result<()> {
     }
 
     let ast = pyro_core::parse(source.as_str())?;
-    let runtime = Runtime::default();
 
-    execute(runtime, ast).await?;
+    execute(ast).await?;
 
     Ok(())
 }
@@ -41,8 +41,8 @@ fn default_scope() -> Scope {
     let (print_output, mut print_input) = mpsc::unbounded_channel();
 
     scope.insert(
-        "print".to_string(),
-        RuntimeValue::Output(Type::Name("String".to_string()), print_output),
+        "print-output".to_string(),
+        RuntimeValue::Output(print_output),
     );
 
     tokio::spawn(async move {
@@ -56,10 +56,10 @@ fn default_scope() -> Scope {
     scope
 }
 
-async fn execute(_runtime: Runtime, progs: VecDeque<Tag<Proc<Pos>, Pos>>) -> eyre::Result<()> {
+async fn execute(progs: Vec<Tag<Proc<Ann>, Ann>>) -> eyre::Result<()> {
     enum Msg {
         Job(UnboundedSender<Msg>, Suspend),
-        Completed,
+        Completed(u64),
     }
 
     let default_scope = default_scope();
@@ -75,23 +75,27 @@ async fn execute(_runtime: Runtime, progs: VecDeque<Tag<Proc<Pos>, Pos>>) -> eyr
 
     let handle = tokio::spawn(async move {
         let mut gauge = 0i32;
+        let mut proc_id_gen = 0u64;
 
         while let Some(msg) = mailbox.recv().await {
             match msg {
                 Msg::Job(out, s) => {
+                    let proc_id = proc_id_gen;
+                    proc_id_gen += 1;
+
                     tokio::spawn(async move {
                         for next in execute_proc(s.scope, s.proc).await? {
                             let _ = out.send(Msg::Job(out.clone(), next));
                         }
 
-                        let _ = out.send(Msg::Completed);
+                        let _ = out.send(Msg::Completed(proc_id));
                         Ok::<_, eyre::Error>(())
                     });
 
                     gauge += 1;
                 }
 
-                Msg::Completed => {
+                Msg::Completed(_proc_id) => {
                     gauge -= 1;
                     if gauge <= 0 {
                         break;
@@ -111,10 +115,10 @@ async fn execute(_runtime: Runtime, progs: VecDeque<Tag<Proc<Pos>, Pos>>) -> eyr
 
 struct Suspend {
     scope: Scope,
-    proc: Proc<Pos>,
+    proc: Proc<Ann>,
 }
 
-async fn execute_proc(mut scope: Scope, proc: Proc<Pos>) -> eyre::Result<Vec<Suspend>> {
+async fn execute_proc(mut scope: Scope, proc: Proc<Ann>) -> eyre::Result<Vec<Suspend>> {
     let mut sus = Vec::new();
 
     match proc {
@@ -154,31 +158,20 @@ async fn execute_proc(mut scope: Scope, proc: Proc<Pos>) -> eyre::Result<Vec<Sus
 
 fn execute_output(
     scope: &mut Scope,
-    target: Tag<Val, Pos>,
-    param: Tag<Val, Pos>,
+    target: Tag<Val, Ann>,
+    param: Tag<Val, Ann>,
 ) -> eyre::Result<()> {
-    let pos = target.tag;
-    let (typ, target) = if let Val::Path(path) = &target.item {
+    let pos = target.tag.pos;
+    let target_type = target.tag.r#type;
+    let param_type = param.tag.r#type;
+    let target = if let Val::Path(path) = &target.item {
         let id = build_var_id(path.as_slice());
+        let key = format!("{}-output", id);
 
-        match id.as_str() {
-            "print" => {
-                let RuntimeValue::Output(typ, out) = scope.look_up(id.as_str())? else {
-                    eyre::bail!("unreachable code");
-                };
-
-                (typ, out)
-            }
-
-            _ => {
-                let key = format!("{}-output", id);
-
-                if let RuntimeValue::Output(typ, out) = scope.take(&key)? {
-                    (typ, out)
-                } else {
-                    eyre::bail!("'{}' is not an output", id);
-                }
-            }
+        if let RuntimeValue::Output(out) = scope.take(&key)? {
+            out
+        } else {
+            eyre::bail!("'{}' is not an output", id);
         }
     } else {
         eyre::bail!(
@@ -188,15 +181,14 @@ fn execute_output(
     };
 
     let value = resolve(scope, param.item)?;
-    let value_type = value.r#type();
 
-    if !value_type.typecheck(&typ.inner_type()) {
+    if !param_type.typecheck(&target_type.inner_type()) {
         eyre::bail!(
             "{}:{}: Type mismatch, expected channel type to be {} but got {} instead",
             pos.line,
             pos.column,
-            typ,
-            value_type,
+            target_type,
+            param_type,
         );
     }
 
@@ -207,16 +199,15 @@ fn execute_output(
 
 async fn execute_input(
     scope: &mut Scope,
-    source: Tag<Val, Pos>,
-    abs: Tag<Abs<Pos>, Pos>,
+    source: Tag<Val, Ann>,
+    abs: Tag<Abs<Ann>, Ann>,
 ) -> eyre::Result<Option<Suspend>> {
-    let pos = source.tag;
-    let (typ, source) = if let Val::Path(path) = &source.item {
+    let source = if let Val::Path(path) = &source.item {
         let id = build_var_id(path.as_slice());
         let key = format!("{}-input", id);
 
-        if let RuntimeValue::Input(typ, chan) = scope.take(&key)? {
-            (typ, chan)
+        if let RuntimeValue::Input(chan) = scope.take(&key)? {
+            chan
         } else {
             eyre::bail!("'{}' is not an input", id);
         }
@@ -229,17 +220,6 @@ async fn execute_input(
 
     let mut recv = source.lock().await;
     if let Some(value) = recv.recv().await {
-        let value_type = value.r#type();
-        if !value_type.typecheck(&typ.inner_type()) {
-            eyre::bail!(
-                "{}:{}: Type mismatch, expected channel type to be {} but got {} instead",
-                pos.line,
-                pos.column,
-                typ,
-                value_type,
-            );
-        }
-
         update_scope(scope, &value, abs.item.pattern.clone());
 
         return Ok(Some(Suspend {
@@ -297,43 +277,13 @@ fn build_var_id(paths: &[String]) -> String {
     paths.join(".").to_string().to_string()
 }
 
-#[derive(Default)]
-struct Runtime {
-    scopes: VecDeque<Scope>,
-    scope: u64,
-}
-
 #[derive(Clone)]
 enum RuntimeValue {
-    Input(Type, Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
-    Output(Type, mpsc::UnboundedSender<RuntimeValue>),
+    Input(Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
+    Output(UnboundedSender<RuntimeValue>),
     Literal(Literal),
     Record(Record<RuntimeValue>),
-    Abs(Abs<Pos>),
-}
-
-impl RuntimeValue {
-    pub fn r#type(&self) -> Type {
-        match self {
-            RuntimeValue::Input(t, _) => t.clone(),
-            RuntimeValue::Output(t, _) => t.clone(),
-            RuntimeValue::Literal(l) => l.r#type(),
-            RuntimeValue::Record(r) => record_type(&r),
-            RuntimeValue::Abs(_) => todo!(),
-        }
-    }
-}
-
-fn record_type(value: &Record<RuntimeValue>) -> Type {
-    let rec = value.clone().map(|r| r.r#type());
-
-    Type::Record(rec)
-}
-
-#[derive(Clone)]
-struct Channel {
-    input: Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>,
-    output: mpsc::UnboundedSender<RuntimeValue>,
+    _Abs(Abs<Pos>),
 }
 
 #[derive(Default, Clone)]
@@ -355,28 +305,21 @@ impl Scope {
             return Ok(value);
         }
 
-        eyre::bail!("Unknown identififer '{}'", name)
+        eyre::bail!("Unknown identifier '{}'", name)
     }
 
     fn insert(&mut self, name: String, value: RuntimeValue) {
         self.variables.insert(name, value);
     }
 
-    fn register(&mut self, decl: Decl<Pos>) {
+    fn register(&mut self, decl: Decl<Ann>) {
         match decl {
-            Decl::Channel(name, r#type) => {
+            Decl::Channel(name, _) => {
                 let (output, input) = mpsc::unbounded_channel();
                 let input = Arc::new(Mutex::new(input));
 
-                self.insert(
-                    format!("{}-output", name),
-                    RuntimeValue::Output(r#type.clone(), output),
-                );
-
-                self.insert(
-                    format!("{}-input", name),
-                    RuntimeValue::Input(r#type, input),
-                );
+                self.insert(format!("{}-output", name), RuntimeValue::Output(output));
+                self.insert(format!("{}-input", name), RuntimeValue::Input(input));
             }
 
             Decl::Def(defs) => {
@@ -391,7 +334,7 @@ impl Scope {
         }
     }
 
-    fn register_def(&self, def: Def<Pos>) {
+    fn register_def(&self, _def: Def<Ann>) {
         todo!()
     }
 }

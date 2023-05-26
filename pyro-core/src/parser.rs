@@ -4,7 +4,6 @@ mod tests;
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
 use crate::sym::{Keyword, Punctuation, Sym};
 use crate::tokenizer::{Pos, Token};
-use std::collections::VecDeque;
 use std::iter::Peekable;
 use std::slice::Iter;
 
@@ -651,12 +650,12 @@ impl<'a> Parser<'a> {
         state.expect_keyword(Keyword::Run)?;
         state.skip_whitespace();
 
-        let mut procs = VecDeque::new();
+        let mut procs = Vec::new();
 
         loop {
             let pos = state.pos();
 
-            procs.push_back(Tag {
+            procs.push(Tag {
                 item: state.parse_proc()?,
                 tag: pos,
             });

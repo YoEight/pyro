@@ -1,9 +1,8 @@
 use crate::sym::Literal;
-use std::collections::VecDeque;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Program<A> {
-    pub procs: VecDeque<Tag<Proc<A>, A>>,
+    pub procs: Vec<Tag<Proc<A>, A>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -82,6 +81,7 @@ pub enum Type {
     Channel(Box<Type>),
     Anonymous,
     Record(Record<Type>),
+    Process,
 }
 
 impl Type {
@@ -108,6 +108,7 @@ impl std::fmt::Display for Type {
             Type::Name(n) => write!(f, "{}", n),
             Type::Channel(t) => write!(f, "^{}", t),
             Type::Anonymous => write!(f, "<anonymous>"), // TODO - we could implement universal type.
+            Type::Process => write!(f, "Process"), // TODO - we could implement universal type.
             Type::Record(r) => write!(f, "{}", r),
         }
     }
@@ -177,6 +178,21 @@ impl<A> Record<A> {
         }
 
         acc
+    }
+
+    pub fn find_by_prop(&self, name: &str) -> Option<Prop<A>>
+    where
+        A: Clone,
+    {
+        for prop in &self.props {
+            if let Some(label) = &prop.label {
+                if label == name {
+                    return Some(prop.clone());
+                }
+            }
+        }
+
+        None
     }
 }
 
