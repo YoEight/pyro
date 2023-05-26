@@ -46,9 +46,26 @@ pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
 fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
-            // TODO - Do an existence checking at that level.
             let l = annotate_val(&mut ctx, l)?;
             let r = annotate_val(&mut ctx, r)?;
+
+            if !l.tag.r#type.is_channel() {
+                return Err(Error {
+                    pos: l.tag.pos,
+                    message: format!("'{}' must be a channel", l.item),
+                });
+            }
+
+            if !l.tag.r#type.inner_type().typecheck(&r.tag.r#type) {
+                return Err(Error {
+                    pos: r.tag.pos,
+                    message: format!(
+                        "Expected type '{}' but got '{}' instead",
+                        l.tag.r#type.inner_type(),
+                        r.tag.r#type
+                    ),
+                });
+            }
 
             Ok(Tag {
                 tag: Ann {
@@ -61,7 +78,25 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
 
         Proc::Input(l, r) => {
             let l = annotate_val_input(&mut ctx, l)?;
-            let r = annotate_abs(&ctx, r)?;
+            let (pat_type, r) = annotate_abs(&ctx, r)?;
+
+            if !l.tag.r#type.is_channel() {
+                return Err(Error {
+                    pos: l.tag.pos,
+                    message: format!("'{}' must be a channel", l.item),
+                });
+            }
+
+            if !l.tag.r#type.inner_type().typecheck(&pat_type) {
+                return Err(Error {
+                    pos: r.tag.pos,
+                    message: format!(
+                        "Expected type '{}' but got '{}' instead",
+                        l.tag.r#type.inner_type(),
+                        pat_type
+                    ),
+                });
+            }
 
             Ok(Tag {
                 tag: Ann {
@@ -111,20 +146,23 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
     }
 }
 
-fn annotate_abs(ctx: &Ctx, tag: Tag<Abs<Pos>, Pos>) -> Result<Tag<Abs<Ann>, Ann>> {
+fn annotate_abs(ctx: &Ctx, tag: Tag<Abs<Pos>, Pos>) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
     let proc = annotate_proc(ctx.clone(), *tag.item.proc)?;
     let mut ann = proc.tag.clone();
+    let pat_type = pattern_type(ctx, &tag.item.pattern);
 
     ann.pos = tag.tag;
-    ann.r#type = Type::Process;
 
-    Ok(Tag {
-        item: Abs {
-            pattern: tag.item.pattern,
-            proc: Box::new(proc),
+    Ok((
+        pat_type,
+        Tag {
+            item: Abs {
+                pattern: tag.item.pattern,
+                proc: Box::new(proc),
+            },
+            tag: ann,
         },
-        tag: ann,
-    })
+    ))
 }
 
 fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<Ann>, Ann>> {
@@ -145,8 +183,7 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
             for def in defs {
-                let abs = annotate_abs(&ctx, def.abs)?;
-                let r#type = pattern_type(&ctx, &abs.item.pattern);
+                let (r#type, abs) = annotate_abs(&ctx, def.abs)?;
 
                 ctx.variables
                     .insert(def.name.clone(), Type::Channel(Box::new(r#type)));
@@ -181,7 +218,7 @@ fn annotate_val_input(ctx: &mut Ctx, lit: Tag<Val, Pos>) -> Result<Tag<Val, Ann>
                 item: lit.item,
                 tag: Ann {
                     pos: lit.tag,
-                    r#type: Type::Channel(Box::new(r#type.clone())),
+                    r#type: r#type.clone(),
                 },
             })
         }
@@ -192,7 +229,7 @@ fn annotate_val_input(ctx: &mut Ctx, lit: Tag<Val, Pos>) -> Result<Tag<Val, Ann>
 
 fn literal_type(lit: &Literal) -> Type {
     match lit {
-        Literal::Number(_) => Type::Name("Number".to_string()),
+        Literal::Integer(_) => Type::Name("Integer".to_string()),
         Literal::String(_) => Type::Name("String".to_string()),
         Literal::Char(_) => Type::Name("Char".to_string()),
         Literal::Bool(_) => Type::Name("Bool".to_string()),

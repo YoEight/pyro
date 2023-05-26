@@ -40,7 +40,7 @@ impl Display for Keyword {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     /// An unsigned numeric literal
-    Number(u64),
+    Integer(u64),
     /// Double quoted string: i.e: "string"
     String(String),
     Char(char),
@@ -50,7 +50,7 @@ pub enum Literal {
 impl Literal {
     pub fn typematch(&self, r#type: &Type) -> bool {
         match (self, r#type) {
-            (Literal::Number(_), Type::Name(name)) => name == "Int",
+            (Literal::Integer(_), Type::Name(name)) => name == "Int",
             (Literal::String(_), Type::Name(name)) => name == "String",
             (Literal::Char(_), Type::Name(name)) => name == "Char",
             (Literal::Bool(_), Type::Name(name)) => name == "Bool",
@@ -61,7 +61,7 @@ impl Literal {
 
     pub fn r#type(&self) -> Type {
         match self {
-            Literal::Number(_) => Type::Name("Int".to_string()),
+            Literal::Integer(_) => Type::Name("Int".to_string()),
             Literal::String(_) => Type::Name("String".to_string()),
             Literal::Char(_) => Type::Name("Char".to_string()),
             Literal::Bool(_) => Type::Name("Bool".to_string()),
@@ -72,7 +72,7 @@ impl Literal {
 impl Display for Literal {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            Literal::Number(num) => num.to_string(),
+            Literal::Integer(num) => num.to_string(),
             Literal::String(s) => format!("\"{}\"", s),
             Literal::Char(c) => format!("'{}'", c),
             Literal::Bool(b) => b.to_string(),

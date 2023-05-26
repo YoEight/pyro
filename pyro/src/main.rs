@@ -40,7 +40,7 @@ fn default_scope() -> Scope {
     let mut scope = Scope::default();
     let (print_output, mut print_input) = mpsc::unbounded_channel();
 
-    scope.insert(
+    scope.globals.insert(
         "print-output".to_string(),
         RuntimeValue::Output(print_output),
     );
@@ -263,10 +263,10 @@ fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat) {
     }
 }
 
-fn resolve(scope: &Scope, value: Val) -> eyre::Result<RuntimeValue> {
+fn resolve(scope: &mut Scope, value: Val) -> eyre::Result<RuntimeValue> {
     match value {
         Val::Literal(l) => Ok(RuntimeValue::Literal(l.clone())),
-        Val::Path(paths) => scope.look_up(&build_var_id(&paths)),
+        Val::Path(paths) => scope.take(&build_var_id(&paths)),
         Val::Record(r) => Ok(RuntimeValue::Record(
             r.traverse_result(|v| resolve(scope, v))?,
         )),
@@ -288,21 +288,18 @@ enum RuntimeValue {
 
 #[derive(Default, Clone)]
 struct Scope {
+    globals: HashMap<String, RuntimeValue>,
     variables: HashMap<String, RuntimeValue>,
 }
 
 impl Scope {
-    fn look_up(&self, name: &str) -> eyre::Result<RuntimeValue> {
-        if let Some(value) = self.variables.get(name) {
-            return Ok(value.clone());
-        }
-
-        eyre::bail!("Unknown identifier '{}'", name)
-    }
-
     fn take(&mut self, name: &str) -> eyre::Result<RuntimeValue> {
         if let Some(value) = self.variables.remove(name) {
             return Ok(value);
+        }
+
+        if let Some(value) = self.globals.get(name) {
+            return Ok(value.clone());
         }
 
         eyre::bail!("Unknown identifier '{}'", name)

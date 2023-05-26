@@ -303,7 +303,7 @@ impl<'a> Tokenizer<'a> {
                         }
                     };
 
-                    Ok(Some(Sym::Literal(Literal::Number(num))))
+                    Ok(Some(Sym::Literal(Literal::Integer(num))))
                 }
 
                 _ => Err(Error {

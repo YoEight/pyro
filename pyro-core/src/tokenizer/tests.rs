@@ -139,7 +139,7 @@ fn test_token_number() {
     let tokenizer = Tokenizer { query: "1234" };
     let expected = vec![
         Token {
-            item: Sym::Literal(Literal::Number(1234)),
+            item: Sym::Literal(Literal::Integer(1234)),
             pos: Pos { line: 1, column: 1 },
         },
         Token {

@@ -100,6 +100,14 @@ impl Type {
 
         self.clone()
     }
+
+    pub fn is_channel(&self) -> bool {
+        if let Type::Channel(_) = self {
+            return true;
+        }
+
+        false
+    }
 }
 
 impl std::fmt::Display for Type {
@@ -154,14 +162,14 @@ impl<A> Record<A> {
         Record { props }
     }
 
-    pub fn traverse_result<F, B, E>(self, fun: F) -> Result<Record<B>, E>
+    pub fn traverse_result<F, B, E>(self, mut fun: F) -> Result<Record<B>, E>
     where
-        F: Fn(A) -> Result<B, E>,
+        F: FnMut(A) -> Result<B, E>,
     {
         let mut props = Vec::new();
 
         for prop in self.props {
-            props.push(prop.traverse_result(&fun)?);
+            props.push(prop.traverse_result(&mut fun)?);
         }
 
         Ok(Record { props })
