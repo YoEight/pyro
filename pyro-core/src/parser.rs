@@ -470,10 +470,10 @@ impl<'a> ParserState<'a> {
                 item: decl,
                 tag: decl_pos,
             },
-            Tag {
-                item: Box::new(proc),
+            Box::new(Tag {
+                item: proc,
                 tag: pos,
-            },
+            }),
         ))
     }
 
@@ -651,14 +651,14 @@ impl<'a> ParserState<'a> {
 
         Ok(Proc::Cond(
             val,
-            Tag {
-                item: Box::new(if_proc),
+            Box::new(Tag {
+                item: if_proc,
                 tag: if_pos,
-            },
-            Tag {
-                item: Box::new(else_proc),
+            }),
+            Box::new(Tag {
+                item: else_proc,
                 tag: else_pos,
-            },
+            }),
         ))
     }
 }

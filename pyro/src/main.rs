@@ -144,16 +144,27 @@ async fn execute_proc(mut scope: Scope, proc: Tag<Proc<Ann>, Ann>) -> eyre::Resu
 
         Proc::Decl(decl, proc) => {
             scope.register(decl.item);
-            sus.push(Suspend {
-                scope,
-                proc: proc.unbox(),
-            });
+            sus.push(Suspend { scope, proc: *proc });
         }
 
-        Proc::Cond(_, _, _) => todo!(),
+        Proc::Cond(test, if_proc, else_proc) => {
+            let test = resolve(&mut scope, test.item)?;
+            let test = to_bool(test)?;
+            let proc = if test { if_proc } else { else_proc };
+
+            sus.push(Suspend { scope, proc: *proc })
+        }
     };
 
     Ok(sus)
+}
+
+fn to_bool(val: RuntimeValue) -> eyre::Result<bool> {
+    if let RuntimeValue::Literal(Literal::Bool(b)) = val {
+        return Ok(b);
+    }
+
+    eyre::bail!("Unexpected runtime exception: type mismatch, expected Bool but got something else")
 }
 
 fn execute_output(

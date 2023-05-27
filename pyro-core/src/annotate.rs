@@ -145,18 +145,38 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
 
         Proc::Decl(d, p) => {
             let d = annotate_decl(&mut ctx, d)?;
-            let p = annotate_proc(ctx.clone(), p.map_item(|b| *b))?;
-            let p = p.map_item(Box::new);
+            let p = annotate_proc(ctx.clone(), *p)?;
             let mut tag = p.tag.clone();
             tag.r#type = Type::Process;
 
             Ok(Tag {
-                item: Proc::Decl(d, p),
+                item: Proc::Decl(d, Box::new(p)),
                 tag,
             })
         }
 
-        Proc::Cond(_, _, _) => todo!(),
+        Proc::Cond(val, if_proc, else_proc) => {
+            let val = annotate_val(&mut ctx, ValCtx::Regular, val)?;
+
+            if !val.tag.r#type.typecheck(&Type::Name("Bool".to_string())) {
+                return Err(Error {
+                    pos: val.tag.pos,
+                    message: format!("Expected type 'Bool' but got '{}' instead", val.tag.r#type),
+                });
+            }
+
+            let mut ann = Ann::with_type(Type::Process, proc.tag);
+            let if_proc = annotate_proc(ctx.clone(), *if_proc)?;
+            let else_proc = annotate_proc(ctx.clone(), *else_proc)?;
+
+            ann.used.extend(if_proc.tag.used.clone());
+            ann.used.extend(else_proc.tag.used.clone());
+
+            Ok(Tag {
+                item: Proc::Cond(val, Box::new(if_proc), Box::new(else_proc)),
+                tag: ann,
+            })
+        }
     }
 }
 

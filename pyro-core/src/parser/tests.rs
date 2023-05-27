@@ -610,20 +610,20 @@ fn test_parse_cond() {
             item: Val::Literal(Literal::Bool(true)),
             tag: Pos { line: 1, column: 4 },
         },
-        Tag {
-            item: Box::new(Proc::Null),
+        Box::new(Tag {
+            item: Proc::Null,
             tag: Pos {
                 line: 1,
                 column: 14,
             },
-        },
-        Tag {
-            item: Box::new(Proc::Null),
+        }),
+        Box::new(Tag {
+            item: Proc::Null,
             tag: Pos {
                 line: 1,
                 column: 22,
             },
-        },
+        }),
     );
 
     assert_eq!(expected, ast);

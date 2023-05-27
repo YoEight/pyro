@@ -47,8 +47,8 @@ pub enum Proc<A> {
     Input(Tag<Val<A>, A>, Tag<Abs<A>, A>),
     Null, // ()
     Parallel(Vec<Tag<Proc<A>, A>>),
-    Decl(Tag<Decl<A>, A>, Tag<Box<Proc<A>>, A>),
-    Cond(Tag<Val<A>, A>, Tag<Box<Proc<A>>, A>, Tag<Box<Proc<A>>, A>),
+    Decl(Tag<Decl<A>, A>, Box<Tag<Proc<A>, A>>),
+    Cond(Tag<Val<A>, A>, Box<Tag<Proc<A>, A>>, Box<Tag<Proc<A>, A>>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -104,7 +104,7 @@ pub enum Type {
 
 impl Type {
     pub fn typecheck(&self, other: &Type) -> bool {
-        if self == &Type::Anonymous {
+        if self == &Type::Anonymous || other == &Type::Anonymous {
             return true;
         }
 
@@ -120,11 +120,10 @@ impl Type {
     }
 
     pub fn is_channel(&self) -> bool {
-        if let Type::Channel(_) = self {
-            return true;
+        match self {
+            Type::Anonymous | Type::Channel(_) => true,
+            _ => false,
         }
-
-        false
     }
 }
 
