@@ -355,13 +355,7 @@ fn annotate_val(
 
                 let mut ann = Ann::with_type(r#type.clone(), lit.tag);
 
-                let used_var = if val_ctx == ValCtx::Input {
-                    format!("{}-input", name)
-                } else {
-                    format!("{}-output", name)
-                };
-
-                ann.used.insert(used_var, r#type.clone());
+                ann.used.insert(name.clone(), r#type.clone());
 
                 Ok(Tag {
                     item: Val::Path(p),

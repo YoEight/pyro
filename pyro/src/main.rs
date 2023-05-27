@@ -41,8 +41,8 @@ fn default_scope() -> Scope {
     let (print_output, mut print_input) = mpsc::unbounded_channel();
 
     scope.globals.insert(
-        "print-output".to_string(),
-        RuntimeValue::Output(print_output),
+        "print".to_string(),
+        RuntimeValue::Channel(Channel::Client(print_output)),
     );
 
     tokio::spawn(async move {
@@ -167,6 +167,28 @@ fn to_bool(val: RuntimeValue) -> eyre::Result<bool> {
     eyre::bail!("Unexpected runtime exception: type mismatch, expected Bool but got something else")
 }
 
+fn to_channel(val: RuntimeValue) -> eyre::Result<Channel> {
+    if let RuntimeValue::Channel(c) = val {
+        return Ok(c);
+    }
+
+    eyre::bail!("Unexpected runtime exception: type mismatch, expected a channel")
+}
+
+fn to_client(val: RuntimeValue) -> eyre::Result<UnboundedSender<RuntimeValue>> {
+    match to_channel(val)? {
+        Channel::Dual(_, c) | Channel::Client(c) => Ok(c),
+        _ => eyre::bail!("Unexpected runtime exception: typemismatch, expected a client channel"),
+    }
+}
+
+fn to_server(val: RuntimeValue) -> eyre::Result<Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>> {
+    match to_channel(val)? {
+        Channel::Dual(s, _) | Channel::_Server(s) => Ok(s),
+        _ => eyre::bail!("Unexpected runtime exception: typemismatch, expected a server channel"),
+    }
+}
+
 fn execute_output(
     scope: &mut Scope,
     target: Tag<Val<Ann>, Ann>,
@@ -177,13 +199,8 @@ fn execute_output(
     let param_type = param.tag.r#type;
     let target = if let Val::Path(path) = &target.item {
         let id = build_var_id(path.as_slice());
-        let key = format!("{}-output", id);
 
-        if let RuntimeValue::Output(out) = scope.take(&key)? {
-            out
-        } else {
-            eyre::bail!("'{}' is not an output", id);
-        }
+        to_client(scope.take(&id)?)?
     } else {
         eyre::bail!(
             "Unexpected value '{}' when looking for a channel's output",
@@ -215,13 +232,7 @@ async fn execute_input(
 ) -> eyre::Result<Option<Suspend>> {
     let source = if let Val::Path(path) = &source.item {
         let id = build_var_id(path.as_slice());
-        let key = format!("{}-input", id);
-
-        if let RuntimeValue::Input(chan) = scope.take(&key)? {
-            chan
-        } else {
-            eyre::bail!("'{}' is not an input", id);
-        }
+        to_server(scope.take(&id)?)?
     } else {
         eyre::bail!(
             "Unexpected value '{}' when looking for a channel's input",
@@ -291,11 +302,20 @@ fn build_var_id(paths: &[String]) -> String {
 
 #[derive(Clone)]
 enum RuntimeValue {
-    Input(Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
-    Output(UnboundedSender<RuntimeValue>),
+    Channel(Channel),
     Literal(Literal),
     Record(Record<RuntimeValue>),
     _Abs(Abs<Pos>),
+}
+
+#[derive(Clone)]
+enum Channel {
+    Dual(
+        Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>,
+        UnboundedSender<RuntimeValue>,
+    ),
+    Client(UnboundedSender<RuntimeValue>),
+    _Server(Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
 }
 
 #[derive(Default, Clone)]
@@ -327,8 +347,7 @@ impl Scope {
                 let (output, input) = mpsc::unbounded_channel();
                 let input = Arc::new(Mutex::new(input));
 
-                self.insert(format!("{}-output", name), RuntimeValue::Output(output));
-                self.insert(format!("{}-input", name), RuntimeValue::Input(input));
+                self.insert(name, RuntimeValue::Channel(Channel::Dual(input, output)));
             }
 
             Decl::Def(defs) => {
