@@ -69,7 +69,7 @@ async fn execute(progs: Vec<Tag<Proc<Ann>, Ann>>) -> eyre::Result<()> {
     for tag in progs {
         work_items.push(Suspend {
             scope: default_scope.clone(),
-            proc: tag.item,
+            proc: tag,
         });
     }
 
@@ -115,13 +115,13 @@ async fn execute(progs: Vec<Tag<Proc<Ann>, Ann>>) -> eyre::Result<()> {
 
 struct Suspend {
     scope: Scope,
-    proc: Proc<Ann>,
+    proc: Tag<Proc<Ann>, Ann>,
 }
 
-async fn execute_proc(mut scope: Scope, proc: Proc<Ann>) -> eyre::Result<Vec<Suspend>> {
+async fn execute_proc(mut scope: Scope, proc: Tag<Proc<Ann>, Ann>) -> eyre::Result<Vec<Suspend>> {
     let mut sus = Vec::new();
 
-    match proc {
+    match proc.item {
         Proc::Output(target, param) => {
             execute_output(&mut scope, target, param)?;
         }
@@ -137,7 +137,7 @@ async fn execute_proc(mut scope: Scope, proc: Proc<Ann>) -> eyre::Result<Vec<Sus
             for proc in procs {
                 sus.push(Suspend {
                     scope: scope.clone(),
-                    proc: proc.item,
+                    proc,
                 });
             }
         }
@@ -146,7 +146,7 @@ async fn execute_proc(mut scope: Scope, proc: Proc<Ann>) -> eyre::Result<Vec<Sus
             scope.register(decl.item);
             sus.push(Suspend {
                 scope,
-                proc: *proc.item,
+                proc: proc.unbox(),
             });
         }
 
@@ -218,13 +218,14 @@ async fn execute_input(
         );
     };
 
+    scope.retain(|name| abs.tag.used.contains_key(name));
     let mut recv = source.lock().await;
     if let Some(value) = recv.recv().await {
         update_scope(scope, &value, abs.item.pattern.item.clone());
 
         return Ok(Some(Suspend {
             scope: scope.clone(),
-            proc: abs.item.proc.item,
+            proc: *abs.item.proc,
         }));
     }
 
@@ -329,6 +330,13 @@ impl Scope {
                 // There is no value at runtime to register a new type declaration.
             }
         }
+    }
+
+    fn retain<F>(&mut self, fun: F)
+    where
+        F: Fn(&str) -> bool,
+    {
+        self.variables.retain(|key, _| fun(key))
     }
 
     fn register_def(&self, _def: Def<Ann>) {
