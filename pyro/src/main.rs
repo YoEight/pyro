@@ -40,7 +40,7 @@ fn default_scope() -> Scope {
     let mut scope = Scope::default();
     let (print_output, mut print_input) = mpsc::unbounded_channel();
 
-    scope.globals.insert(
+    scope.insert(
         "print".to_string(),
         RuntimeValue::Channel(Channel::Client(print_output)),
     );
@@ -320,7 +320,6 @@ enum Channel {
 
 #[derive(Default, Clone)]
 struct Scope {
-    globals: HashMap<String, RuntimeValue>,
     variables: HashMap<String, RuntimeValue>,
 }
 
@@ -328,10 +327,6 @@ impl Scope {
     fn take(&mut self, name: &str) -> eyre::Result<RuntimeValue> {
         if let Some(value) = self.variables.remove(name) {
             return Ok(value);
-        }
-
-        if let Some(value) = self.globals.get(name) {
-            return Ok(value.clone());
         }
 
         eyre::bail!("Unknown identifier '{}'", name)
