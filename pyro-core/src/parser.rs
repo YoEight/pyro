@@ -385,6 +385,8 @@ impl<'a> ParserState<'a> {
                 }
             }
 
+            Sym::Keyword(Keyword::If) => self.parse_cond(),
+
             _ => Err(Error {
                 pos: token.pos,
                 message: format!("Unexpected token '{}'", token.item()),
@@ -625,6 +627,39 @@ impl<'a> ParserState<'a> {
 
     pub fn pos(&mut self) -> Pos {
         self.look_ahead().pos
+    }
+
+    fn parse_cond(&mut self) -> Result<Proc<Pos>> {
+        self.expect_keyword(Keyword::If)?;
+        self.skip_spaces();
+
+        let val = self.parse_value()?;
+
+        self.skip_spaces();
+        self.expect_keyword(Keyword::Then)?;
+        self.skip_spaces();
+
+        let if_pos = self.pos();
+        let if_proc = self.parse_proc()?;
+
+        self.skip_spaces();
+        self.expect_keyword(Keyword::Else)?;
+        self.skip_spaces();
+
+        let else_pos = self.pos();
+        let else_proc = self.parse_proc()?;
+
+        Ok(Proc::Cond(
+            val,
+            Tag {
+                item: Box::new(if_proc),
+                tag: if_pos,
+            },
+            Tag {
+                item: Box::new(else_proc),
+                tag: else_pos,
+            },
+        ))
     }
 }
 

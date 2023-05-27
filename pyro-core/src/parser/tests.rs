@@ -596,3 +596,36 @@ fn test_parse_defs() {
     assert_eq!(expected, ast);
     assert_eq!(state.look_ahead().item(), &Sym::EOF);
 }
+
+#[test]
+fn test_parse_cond() {
+    let query = "if true then () else ()";
+    let tokenizer = Tokenizer::new(query);
+    let tokens = tokenizer.tokenize().unwrap();
+    let mut state = ParserState::new(tokens.as_slice());
+    let ast = state.parse_cond().unwrap();
+
+    let expected = Proc::Cond(
+        Tag {
+            item: Val::Literal(Literal::Bool(true)),
+            tag: Pos { line: 1, column: 4 },
+        },
+        Tag {
+            item: Box::new(Proc::Null),
+            tag: Pos {
+                line: 1,
+                column: 14,
+            },
+        },
+        Tag {
+            item: Box::new(Proc::Null),
+            tag: Pos {
+                line: 1,
+                column: 22,
+            },
+        },
+    );
+
+    assert_eq!(expected, ast);
+    assert_eq!(state.look_ahead().item(), &Sym::EOF);
+}
