@@ -63,20 +63,6 @@ impl<'a> ParserState<'a> {
         self.peekable.next().unwrap()
     }
 
-    pub fn skip_whitespace(&mut self) {
-        if let Sym::Whitespace = &self.look_ahead().item {
-            self.shift();
-            return;
-        }
-    }
-
-    pub fn skip_newline(&mut self) {
-        if let Sym::Newline = &self.look_ahead().item {
-            self.shift();
-            return;
-        }
-    }
-
     pub fn skip_spaces(&mut self) {
         loop {
             match self.look_ahead().item() {
@@ -138,7 +124,7 @@ impl<'a> ParserState<'a> {
         let token = self.shift();
         match &token.item {
             Sym::Id(name) => {
-                self.skip_whitespace();
+                self.skip_spaces();
                 let r#type = self.parse_rtype()?;
 
                 Ok(Var {
@@ -157,7 +143,7 @@ impl<'a> ParserState<'a> {
     pub fn parse_rtype(&mut self) -> Result<Type> {
         if self.next_punct(Punctuation::Colon) {
             self.shift();
-            self.skip_whitespace();
+            self.skip_spaces();
             self.parse_type()
         } else {
             Ok(Type::Anonymous)
@@ -271,7 +257,7 @@ impl<'a> ParserState<'a> {
         K: RecordKind,
     {
         self.expect_punctuation(Punctuation::LBracket)?;
-        self.skip_whitespace();
+        self.skip_spaces();
 
         let mut props = Vec::new();
 
@@ -285,7 +271,7 @@ impl<'a> ParserState<'a> {
             let pos = self.pos();
             let value = kind.parse_value(self)?;
 
-            self.skip_whitespace();
+            self.skip_spaces();
             props.push(Prop {
                 label,
                 val: Tag {
@@ -345,7 +331,7 @@ impl<'a> ParserState<'a> {
             _ if start_like_val(token) => {
                 let lhs = self.parse_value()?;
 
-                self.skip_whitespace();
+                self.skip_spaces();
                 token = self.look_ahead();
 
                 match token.item {
@@ -354,12 +340,12 @@ impl<'a> ParserState<'a> {
                     {
                         if p == Punctuation::ExclamationMark {
                             self.shift();
-                            self.skip_whitespace();
+                            self.skip_spaces();
 
                             Ok(Proc::Output(lhs, self.parse_value()?))
                         } else {
                             self.shift();
-                            self.skip_whitespace();
+                            self.skip_spaces();
 
                             Ok(Proc::Input(lhs, self.parse_abs()?))
                         }
@@ -376,7 +362,7 @@ impl<'a> ParserState<'a> {
 
             Sym::Punctuation(Punctuation::LParen) => {
                 self.shift();
-                self.skip_whitespace();
+                self.skip_spaces();
 
                 if self.next_punct(Punctuation::RParen) {
                     self.shift();
@@ -402,7 +388,7 @@ impl<'a> ParserState<'a> {
         let pos = self.pos();
         let pattern = self.parse_pat()?;
 
-        self.skip_whitespace();
+        self.skip_spaces();
         self.expect(Sym::Eq)?;
         self.skip_spaces();
 
@@ -430,7 +416,7 @@ impl<'a> ParserState<'a> {
         match token.item() {
             Sym::Id(_) => {
                 let var = self.parse_variable()?;
-                self.skip_whitespace();
+                self.skip_spaces();
 
                 let pattern = if self.next_sym(Sym::At) {
                     self.shift();
@@ -446,7 +432,7 @@ impl<'a> ParserState<'a> {
 
             Sym::Underscore => {
                 self.shift();
-                self.skip_whitespace();
+                self.skip_spaces();
 
                 Ok(Pat::Wildcard(self.parse_type()?))
             }
@@ -548,13 +534,13 @@ impl<'a> ParserState<'a> {
 
     fn parse_def(&mut self) -> Result<Decl<Pos>> {
         self.expect_keyword(Keyword::Def)?;
-        self.skip_whitespace();
+        self.skip_spaces();
 
         let mut defs = Vec::new();
 
         loop {
             let id = self.parse_id()?;
-            self.skip_whitespace();
+            self.skip_spaces();
             let abs = self.parse_abs()?;
             self.skip_spaces();
 
@@ -565,7 +551,7 @@ impl<'a> ParserState<'a> {
             }
 
             self.shift();
-            self.skip_whitespace();
+            self.skip_spaces();
         }
 
         Ok(Decl::Def(defs))
@@ -573,12 +559,12 @@ impl<'a> ParserState<'a> {
 
     fn parse_type_decl(&mut self) -> Result<Decl<Pos>> {
         self.expect_keyword(Keyword::Type)?;
-        self.skip_whitespace();
+        self.skip_spaces();
 
         let id = self.parse_type_id()?;
-        self.skip_whitespace();
+        self.skip_spaces();
         self.expect(Sym::Eq)?;
-        self.skip_whitespace();
+        self.skip_spaces();
 
         let r#type = self.parse_type()?;
 
@@ -595,12 +581,12 @@ impl<'a> ParserState<'a> {
             }
 
             self.expect_keyword(Keyword::New)?;
-            self.skip_whitespace();
+            self.skip_spaces();
 
             let id = self.parse_id()?;
-            self.skip_whitespace();
+            self.skip_spaces();
             self.expect_punctuation(Punctuation::Colon)?;
-            self.skip_whitespace();
+            self.skip_spaces();
             let r#type = self.parse_type()?;
 
             chans.push((id, r#type));
@@ -694,7 +680,7 @@ impl<'a> Parser<'a> {
         };
 
         state.expect_keyword(Keyword::Run)?;
-        state.skip_whitespace();
+        state.skip_spaces();
 
         let mut procs = Vec::new();
 
