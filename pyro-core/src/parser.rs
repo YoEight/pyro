@@ -122,6 +122,10 @@ impl<'a> ParserState<'a> {
         fun(self.look_ahead().item())
     }
 
+    pub fn followed_by_keyword(&mut self, keyword: Keyword) -> bool {
+        self.followed_by(|sym| sym == &Sym::Keyword(keyword))
+    }
+
     pub fn next_sym(&mut self, sym: Sym) -> bool {
         self.followed_by(|s| s == &sym)
     }
@@ -400,7 +404,7 @@ impl<'a> ParserState<'a> {
 
         self.skip_whitespace();
         self.expect(Sym::Eq)?;
-        self.skip_whitespace();
+        self.skip_spaces();
 
         let proc_pos = self.pos();
         let proc = self.parse_proc()?;
@@ -508,7 +512,7 @@ impl<'a> ParserState<'a> {
             tag: pos,
         });
 
-        self.skip_whitespace();
+        self.skip_spaces();
         let mut first_time = true;
 
         loop {
@@ -519,13 +523,13 @@ impl<'a> ParserState<'a> {
 
             if self.next_punct(Punctuation::Pipe) {
                 self.shift();
-                self.skip_whitespace();
+                self.skip_spaces();
                 let pos = self.pos();
                 processes.push(Tag {
                     item: self.parse_proc()?,
                     tag: pos,
                 });
-                self.skip_whitespace();
+                self.skip_spaces();
                 first_time = false;
                 continue;
             }
@@ -582,16 +586,27 @@ impl<'a> ParserState<'a> {
     }
 
     fn parse_new_channel(&mut self) -> Result<Decl<Pos>> {
-        self.expect_keyword(Keyword::New)?;
-        self.skip_whitespace();
+        let mut chans = Vec::new();
 
-        let id = self.parse_id()?;
-        self.skip_whitespace();
-        self.expect_punctuation(Punctuation::Colon)?;
-        self.skip_whitespace();
-        let r#type = self.parse_type()?;
+        loop {
+            self.skip_spaces();
+            if !chans.is_empty() && !self.followed_by_keyword(Keyword::New) {
+                break;
+            }
 
-        Ok(Decl::Channel(id, r#type))
+            self.expect_keyword(Keyword::New)?;
+            self.skip_whitespace();
+
+            let id = self.parse_id()?;
+            self.skip_whitespace();
+            self.expect_punctuation(Punctuation::Colon)?;
+            self.skip_whitespace();
+            let r#type = self.parse_type()?;
+
+            chans.push((id, r#type));
+        }
+
+        Ok(Decl::Channels(chans))
     }
 
     fn parse_id(&mut self) -> Result<String> {

@@ -349,11 +349,13 @@ impl Scope {
 
     fn register(&mut self, decl: Decl<Ann>) {
         match decl {
-            Decl::Channel(name, _) => {
-                let (output, input) = mpsc::unbounded_channel();
-                let input = Arc::new(Mutex::new(input));
+            Decl::Channels(chans) => {
+                for (name, _) in chans {
+                    let (output, input) = mpsc::unbounded_channel();
+                    let input = Arc::new(Mutex::new(input));
 
-                self.insert(name, RuntimeValue::Channel(Channel::Dual(input, output)));
+                    self.insert(name, RuntimeValue::Channel(Channel::Dual(input, output)));
+                }
             }
 
             Decl::Def(defs) => {

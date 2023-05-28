@@ -219,10 +219,17 @@ fn annotate_abs(ctx: &mut Ctx, tag: Tag<Abs<Pos>, Pos>) -> Result<(Type, Tag<Abs
 fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<Ann>, Ann>> {
     let ann = Ann::new(decl.tag);
     let item = match decl.item {
-        Decl::Channel(n, t) => {
-            let t = resolve_type(&ctx, decl.tag, t)?;
-            ctx.variables.insert(n.clone(), t.clone());
-            Decl::Channel(n, t)
+        Decl::Channels(cs) => {
+            let mut chans = Vec::new();
+
+            for (n, t) in cs {
+                let t = resolve_type(&ctx, decl.tag, t)?;
+                ctx.variables.insert(n.clone(), t.clone());
+
+                chans.push((n, t));
+            }
+
+            Decl::Channels(chans)
         }
 
         Decl::Type(n, t) => {

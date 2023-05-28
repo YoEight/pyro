@@ -284,7 +284,7 @@ pub struct Def<A> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl<A> {
-    Channel(String, Type),
+    Channels(Vec<(String, Type)>),
     Def(Vec<Def<A>>),
     Type(String, Type),
 }

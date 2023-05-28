@@ -304,7 +304,7 @@ fn test_parse_new_channel() {
     let mut state = ParserState::new(tokens.as_slice());
     let ast = state.parse_decl().unwrap();
 
-    let expected = Decl::Channel("stream".to_string(), Type::Name("Bool".to_string()));
+    let expected = Decl::Channels(vec![("stream".to_string(), Type::Name("Bool".to_string()))]);
 
     assert_eq!(expected, ast);
     assert_eq!(state.look_ahead().item(), &Sym::EOF);
