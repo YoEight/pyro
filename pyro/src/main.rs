@@ -7,7 +7,6 @@ use clap::Parser;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Decl, Def, Pat, Proc, Record, Tag, Val};
 use pyro_core::sym::Literal;
-use pyro_core::Pos;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{mpsc, Mutex};
 
@@ -123,7 +122,9 @@ async fn execute_proc(mut scope: Scope, proc: Tag<Proc<Ann>, Ann>) -> eyre::Resu
 
     match proc.item {
         Proc::Output(target, param) => {
-            execute_output(&mut scope, target, param)?;
+            if let Some(suspend) = execute_output(&mut scope, target, param)? {
+                sus.push(suspend);
+            }
         }
 
         Proc::Input(source, abs) => {
@@ -168,17 +169,10 @@ fn to_bool(val: RuntimeValue) -> eyre::Result<bool> {
 }
 
 fn to_channel(val: RuntimeValue) -> eyre::Result<Channel> {
-    if let RuntimeValue::Channel(c) = val {
-        return Ok(c);
-    }
-
-    eyre::bail!("Unexpected runtime exception: type mismatch, expected a channel")
-}
-
-fn to_client(val: RuntimeValue) -> eyre::Result<UnboundedSender<RuntimeValue>> {
-    match to_channel(val)? {
-        Channel::Dual(_, c) | Channel::Client(c) => Ok(c),
-        _ => eyre::bail!("Unexpected runtime exception: typemismatch, expected a client channel"),
+    match val {
+        RuntimeValue::Channel(c) => Ok(c),
+        RuntimeValue::Abs(_) => todo!(),
+        _ => eyre::bail!("Unexpected runtime exception: type mismatch, expected a channel"),
     }
 }
 
@@ -193,14 +187,31 @@ fn execute_output(
     scope: &mut Scope,
     target: Tag<Val<Ann>, Ann>,
     param: Tag<Val<Ann>, Ann>,
-) -> eyre::Result<()> {
+) -> eyre::Result<Option<Suspend>> {
     let pos = target.tag.pos;
     let target_type = target.tag.r#type;
     let param_type = param.tag.r#type;
     let target = if let Val::Path(path) = &target.item {
         let id = build_var_id(path.as_slice());
 
-        to_client(scope.take(&id)?)?
+        match scope.take(&id)? {
+            RuntimeValue::Channel(Channel::Client(c) | Channel::Dual(_, c)) => c,
+
+            RuntimeValue::Abs(abs) => {
+                let value = resolve(scope, param.item)?;
+
+                update_scope(scope, &value, abs.item.pattern.item);
+
+                return Ok(Some(Suspend {
+                    scope: scope.clone(),
+                    proc: *abs.item.proc,
+                }));
+            }
+
+            _ => {
+                eyre::bail!("Unexpected runtime exception: typemismatch, expected a client channel")
+            }
+        }
     } else {
         eyre::bail!(
             "Unexpected value '{}' when looking for a channel's output",
@@ -222,7 +233,7 @@ fn execute_output(
 
     let _ = target.send(value);
 
-    Ok(())
+    Ok(None)
 }
 
 async fn execute_input(
@@ -305,7 +316,7 @@ enum RuntimeValue {
     Channel(Channel),
     Literal(Literal),
     Record(Record<RuntimeValue>),
-    _Abs(Abs<Pos>),
+    Abs(Tag<Abs<Ann>, Ann>),
 }
 
 #[derive(Clone)]
@@ -364,7 +375,8 @@ impl Scope {
         self.variables.retain(|key, _| fun(key))
     }
 
-    fn register_def(&self, _def: Def<Ann>) {
-        todo!()
+    fn register_def(&mut self, def: Def<Ann>) {
+        self.variables
+            .insert(def.name.clone(), RuntimeValue::Abs(def.abs));
     }
 }
