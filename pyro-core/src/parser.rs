@@ -463,6 +463,7 @@ impl<'a> ParserState<'a> {
         let pos = self.pos();
         let proc = self.parse_proc()?;
 
+        self.skip_spaces();
         self.expect_punctuation(Punctuation::RParen)?;
 
         Ok(Proc::Decl(

@@ -278,15 +278,8 @@ impl<'a> Tokenizer<'a> {
                     chars.next();
 
                     while let Some(ch) = chars.peek() {
-                        if *ch == ' ' {
-                            break;
-                        }
-
                         if !ch.is_ascii_digit() {
-                            return Err(Error {
-                                message: format!("Unexpected symbol when parsing number '{}'", ch),
-                                pos: chars.pos(),
-                            });
+                            break;
                         }
 
                         num.push(*ch);
