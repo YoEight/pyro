@@ -194,7 +194,7 @@ fn execute_output(
     let target = if let Val::Path(path) = &target.item {
         let id = build_var_id(path.as_slice());
 
-        match scope.take(&id)? {
+        match scope.look_up(&id)? {
             RuntimeValue::Channel(Channel::Client(c) | Channel::Dual(_, c)) => c,
 
             RuntimeValue::Abs(abs) => {
@@ -243,7 +243,7 @@ async fn execute_input(
 ) -> eyre::Result<Option<Suspend>> {
     let source = if let Val::Path(path) = &source.item {
         let id = build_var_id(path.as_slice());
-        to_server(scope.take(&id)?)?
+        to_server(scope.look_up(&id)?)?
     } else {
         eyre::bail!(
             "Unexpected value '{}' when looking for a channel's input",
@@ -300,7 +300,7 @@ fn update_scope(scope: &mut Scope, value: &RuntimeValue, pattern: Pat<Ann>) {
 fn resolve(scope: &mut Scope, value: Val<Ann>) -> eyre::Result<RuntimeValue> {
     match value {
         Val::Literal(l) => Ok(RuntimeValue::Literal(l.clone())),
-        Val::Path(paths) => scope.take(&build_var_id(&paths)),
+        Val::Path(paths) => scope.look_up(&build_var_id(&paths)),
         Val::Record(r) => Ok(RuntimeValue::Record(
             r.traverse_result(|v| resolve(scope, v.item))?,
         )),
@@ -335,8 +335,8 @@ struct Scope {
 }
 
 impl Scope {
-    fn take(&mut self, name: &str) -> eyre::Result<RuntimeValue> {
-        if let Some(value) = self.variables.remove(name) {
+    fn look_up(&self, name: &str) -> eyre::Result<RuntimeValue> {
+        if let Some(value) = self.variables.get(name).cloned() {
             return Ok(value);
         }
 
