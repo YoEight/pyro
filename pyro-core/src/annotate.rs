@@ -23,6 +23,7 @@ pub struct Ann {
 #[derive(Default, Clone)]
 struct Ctx {
     variables: HashMap<String, Type>,
+    types: HashMap<String, Type>,
 }
 
 impl Ann {
@@ -39,14 +40,29 @@ impl Ann {
     }
 }
 
-pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
-    let mut annotated = Vec::new();
+fn configure_context() -> Ctx {
     let mut ctx = Ctx::default();
 
     ctx.variables.insert(
         "print".to_string(),
         Type::Channel(Box::new(Type::Name("String".to_string()))),
     );
+
+    ctx.types
+        .insert("String".to_string(), Type::Name("String".to_string()));
+    ctx.types
+        .insert("Bool".to_string(), Type::Name("Bool".to_string()));
+    ctx.types
+        .insert("Integer".to_string(), Type::Name("Integer".to_string()));
+    ctx.types
+        .insert("Char".to_string(), Type::Name("Char".to_string()));
+
+    ctx
+}
+
+pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
+    let mut annotated = Vec::new();
+    let ctx = configure_context();
 
     for proc in prog.procs {
         annotated.push(annotate_proc(ctx.clone(), proc)?);
@@ -204,15 +220,15 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
     let ann = Ann::new(decl.tag);
     let item = match decl.item {
         Decl::Channel(n, t) => {
+            let t = resolve_type(&ctx, decl.tag, t)?;
             ctx.variables.insert(n.clone(), t.clone());
-
             Decl::Channel(n, t)
         }
 
         Decl::Type(n, t) => {
-            ctx.variables.insert(n.clone(), t.clone());
-
-            Decl::Type(n, t)
+            let resolved_type = resolve_type(&ctx, decl.tag, t)?;
+            ctx.types.insert(n.clone(), resolved_type.clone());
+            Decl::Type(n, resolved_type)
         }
 
         Decl::Def(defs) => {
@@ -234,6 +250,34 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
     };
 
     Ok(Tag { item, tag: ann })
+}
+
+fn resolve_type(ctx: &Ctx, pos: Pos, r#type: Type) -> Result<Type> {
+    match r#type {
+        Type::Name(n) => {
+            if let Some(rn) = ctx.types.get(&n) {
+                Ok(rn.clone())
+            } else {
+                Err(Error {
+                    pos,
+                    message: format!("Unknown type '{}'", n),
+                })
+            }
+        }
+
+        Type::Channel(r#type) => {
+            let rn = resolve_type(ctx, pos, *r#type)?;
+            Ok(Type::Channel(Box::new(rn)))
+        }
+
+        Type::Record(rec) => {
+            let rec = rec.traverse_result(|t| resolve_type(ctx, pos, t))?;
+
+            Ok(Type::Record(rec))
+        }
+
+        r#type => Ok(r#type),
+    }
 }
 
 fn literal_type(lit: &Literal) -> Type {
@@ -281,16 +325,20 @@ fn annotate_pattern(ctx: &mut Ctx, tag: Tag<Pat<Pos>, Pos>) -> Result<Tag<Pat<An
             })
         }
 
-        Pat::Wildcard(t) => Ok(Tag {
-            item: Pat::Wildcard(t.clone()),
-            tag: Ann::with_type(t, tag.tag),
-        }),
+        Pat::Wildcard(t) => {
+            let t = resolve_type(&ctx, tag.tag, t)?;
+
+            Ok(Tag {
+                item: Pat::Wildcard(t.clone()),
+                tag: Ann::with_type(t, tag.tag),
+            })
+        }
     }
 }
 fn annotate_pat_var(
     ctx: &mut Ctx,
     pos: Pos,
-    pat_var: PatVar<Pos>,
+    mut pat_var: PatVar<Pos>,
 ) -> Result<Tag<PatVar<Ann>, Ann>> {
     let (r#type, pattern) = if let Some(pat) = pat_var.pattern {
         let param = Tag {
@@ -298,6 +346,7 @@ fn annotate_pat_var(
             tag: pos,
         };
 
+        pat_var.var.r#type = resolve_type(&ctx, pos, pat_var.var.r#type)?;
         let pat = annotate_pattern(ctx, param)?;
 
         if pat_var.var.r#type != Type::Anonymous && !pat.tag.r#type.typecheck(&pat_var.var.r#type) {
@@ -312,7 +361,7 @@ fn annotate_pat_var(
 
         (pat.tag.r#type, Some(Box::new(pat.item)))
     } else {
-        (pat_var.var.r#type.clone(), None)
+        (resolve_type(&ctx, pos, pat_var.var.r#type.clone())?, None)
     };
 
     ctx.variables.insert(pat_var.var.id.clone(), r#type.clone());

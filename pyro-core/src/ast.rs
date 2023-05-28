@@ -104,11 +104,23 @@ pub enum Type {
 
 impl Type {
     pub fn typecheck(&self, other: &Type) -> bool {
-        if self == &Type::Anonymous || other == &Type::Anonymous {
-            return true;
-        }
+        match (self, other) {
+            (Type::Anonymous, _) => true,
+            (_, Type::Anonymous) => true,
 
-        self == other
+            (Type::Record(a), Type::Record(b)) if a.props.len() == b.props.len() => {
+                for (a, b) in a.props.iter().zip(b.props.iter()) {
+                    if !a.val.typecheck(&b.val) {
+                        return false;
+                    }
+                }
+
+                true
+            }
+
+            (Type::Channel(a), Type::Channel(b)) => a.typecheck(b),
+            (a, b) => a == b,
+        }
     }
 
     pub fn inner_type(&self) -> Type {
