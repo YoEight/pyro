@@ -498,5 +498,17 @@ fn annotate_val(
                 tag: ann,
             })
         }
+
+        Val::AnoFun(abs) => {
+            let (r#type, abs) = annotate_abs(ctx, abs)?;
+            let mut ann = abs.tag.clone();
+
+            ann.r#type = r#type;
+
+            Ok(Tag {
+                item: Val::AnoFun(abs),
+                tag: ann,
+            })
+        }
     }
 }

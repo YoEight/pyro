@@ -108,6 +108,15 @@ pub enum Punctuation {
     Comma,
 }
 
+impl Punctuation {
+    pub fn communication_category(&self) -> bool {
+        match self {
+            Punctuation::Caret | Punctuation::QuestionMark | Punctuation::ExclamationMark => true,
+            _ => false,
+        }
+    }
+}
+
 impl Display for Punctuation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let str = match self {
@@ -172,6 +181,8 @@ pub enum Sym {
     At,
     /// `_`
     Underscore,
+    /// `\`
+    BackSlash,
 }
 
 impl Display for Sym {
@@ -199,6 +210,7 @@ impl Display for Sym {
             Sym::Mod => "%",
             Sym::At => "@",
             Sym::Underscore => "_",
+            Sym::BackSlash => "\\",
         };
 
         write!(f, "{}", str)

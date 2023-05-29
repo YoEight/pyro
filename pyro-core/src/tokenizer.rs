@@ -156,6 +156,7 @@ impl<'a> Tokenizer<'a> {
                 '-' => self.consume(chars, Sym::Minus),
                 '*' => self.consume(chars, Sym::Mul),
                 '/' => self.consume(chars, Sym::Div),
+                '\\' => self.consume(chars, Sym::BackSlash),
                 '%' => self.consume(chars, Sym::Mod),
                 '|' => self.consume(chars, Sym::Punctuation(Punctuation::Pipe)),
 

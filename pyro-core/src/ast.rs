@@ -75,6 +75,7 @@ pub enum Val<A> {
     Literal(Literal),
     Path(Vec<String>),
     Record(Record<Tag<Val<A>, A>>),
+    AnoFun(Tag<Abs<A>, A>),
 }
 
 impl<A> std::fmt::Display for Val<A> {
@@ -83,6 +84,7 @@ impl<A> std::fmt::Display for Val<A> {
             Val::Literal(l) => write!(f, "{}", l),
             Val::Path(p) => write!(f, "{}", p.join(".")),
             Val::Record(r) => write!(f, "{}", r),
+            Val::AnoFun(_) => write!(f, "<anonymous function>"),
         }
     }
 }
@@ -97,6 +99,8 @@ pub struct Var {
 pub enum Type {
     Name(String),
     Channel(Box<Type>),
+    Client(Box<Type>),
+    Server(Box<Type>),
     Anonymous,
     Record(Record<Type>),
     Process,
@@ -118,7 +122,12 @@ impl Type {
                 true
             }
 
-            (Type::Channel(a), Type::Channel(b)) => a.typecheck(b),
+            (Type::Channel(a), Type::Channel(b) | Type::Client(b) | Type::Server(b)) => {
+                a.typecheck(b)
+            }
+
+            (Type::Client(a), Type::Client(b)) => a.typecheck(b),
+            (Type::Server(a), Type::Server(b)) => a.typecheck(b),
             (a, b) => a == b,
         }
     }
@@ -144,6 +153,8 @@ impl std::fmt::Display for Type {
         match self {
             Type::Name(n) => write!(f, "{}", n),
             Type::Channel(t) => write!(f, "^{}", t),
+            Type::Client(t) => write!(f, "!{}", t),
+            Type::Server(t) => write!(f, "?{}", t),
             Type::Anonymous => write!(f, "<anonymous>"), // TODO - we could implement universal type.
             Type::Process => write!(f, "Process"), // TODO - we could implement universal type.
             Type::Record(r) => write!(f, "{}", r),

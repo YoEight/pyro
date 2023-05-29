@@ -304,6 +304,7 @@ fn resolve(scope: &mut Scope, value: Val<Ann>) -> eyre::Result<RuntimeValue> {
         Val::Record(r) => Ok(RuntimeValue::Record(
             r.traverse_result(|v| resolve(scope, v.item))?,
         )),
+        Val::AnoFun(abs) => Ok(RuntimeValue::Abs(abs)),
     }
 }
 

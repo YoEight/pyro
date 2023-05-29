@@ -153,6 +153,8 @@ impl<'a> ParserState<'a> {
     fn parse_type(&mut self) -> Result<Type> {
         enum Constr {
             InOut,
+            In,
+            Out,
         }
 
         let mut constrs = Vec::new();
@@ -165,10 +167,18 @@ impl<'a> ParserState<'a> {
                     break Type::Name(s.clone());
                 }
 
-                Sym::Punctuation(p) if p == &Punctuation::Caret || p == &Punctuation::LBracket => {
+                Sym::Punctuation(p)
+                    if p.communication_category() || p == &Punctuation::LBracket =>
+                {
                     if p == &Punctuation::Caret {
                         self.shift();
                         constrs.push(Constr::InOut);
+                    } else if p == &Punctuation::ExclamationMark {
+                        self.shift();
+                        constrs.push(Constr::Out);
+                    } else if p == &Punctuation::QuestionMark {
+                        self.shift();
+                        constrs.push(Constr::In);
                     } else {
                         break self.parse_record_type()?;
                     }
@@ -189,6 +199,8 @@ impl<'a> ParserState<'a> {
         while let Some(constr) = constrs.pop() {
             match constr {
                 Constr::InOut => r#type = Type::Channel(Box::new(r#type)),
+                Constr::In => r#type = Type::Server(Box::new(r#type)),
+                Constr::Out => r#type = Type::Client(Box::new(r#type)),
             }
         }
 
@@ -214,6 +226,18 @@ impl<'a> ParserState<'a> {
             }
 
             Sym::Punctuation(Punctuation::LBracket) => self.parse_record_value(),
+
+            Sym::BackSlash => {
+                self.shift();
+                self.skip_spaces();
+
+                let pos = self.pos();
+                let abs = self.parse_abs()?;
+                Ok(Tag {
+                    item: Val::AnoFun(abs),
+                    tag: pos,
+                })
+            }
 
             _ => Err(Error {
                 pos: token.pos,
