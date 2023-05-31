@@ -44,6 +44,21 @@ fn default_scope() -> Scope {
         RuntimeValue::Channel(Channel::Client(print_output)),
     );
 
+    scope.insert(
+        "+".to_string(),
+        RuntimeValue::Fun(Arc::new(|a| {
+            RuntimeValue::Fun(Arc::new(move |b| match (a.clone(), b.clone()) {
+                (
+                    RuntimeValue::Literal(Literal::Integer(a)),
+                    RuntimeValue::Literal(Literal::Integer(b)),
+                ) => RuntimeValue::Literal(Literal::Integer(a + b)),
+
+                // Code has been type-checked prior to execution!
+                _ => unreachable!(),
+            }))
+        })),
+    );
+
     tokio::spawn(async move {
         while let Some(value) = print_input.recv().await {
             if let RuntimeValue::Literal(Literal::String(s)) = value {
@@ -290,7 +305,17 @@ fn resolve(scope: &mut Scope, value: Val<Ann>) -> eyre::Result<RuntimeValue> {
         Val::Record(r) => Ok(RuntimeValue::Record(
             r.traverse_result(|v| resolve(scope, v.item))?,
         )),
-        Val::AnoFun(abs) => Ok(RuntimeValue::Abs(abs)),
+        Val::AnoClient(abs) => Ok(RuntimeValue::Abs(abs)),
+        Val::App(func, param) => {
+            let func = resolve(scope, func.item)?;
+            let param = resolve(scope, param.item)?;
+
+            if let RuntimeValue::Fun(cont) = func {
+                return Ok(cont(param));
+            }
+
+            eyre::bail!("Unreachable code, means the type checking failed us :'-(")
+        }
     }
 }
 
@@ -304,6 +329,7 @@ enum RuntimeValue {
     Literal(Literal),
     Record(Record<RuntimeValue>),
     Abs(Tag<Abs<Ann>, Ann>),
+    Fun(Arc<dyn Fn(RuntimeValue) -> RuntimeValue + Send + Sync + 'static>),
 }
 
 #[derive(Clone)]

@@ -234,7 +234,7 @@ impl<'a> ParserState<'a> {
                 let pos = self.pos();
                 let abs = self.parse_abs()?;
                 Ok(Tag {
-                    item: Val::AnoFun(abs),
+                    item: Val::AnoClient(abs),
                     tag: pos,
                 })
             }

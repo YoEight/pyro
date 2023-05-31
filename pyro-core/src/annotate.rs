@@ -489,15 +489,54 @@ fn annotate_val(
             })
         }
 
-        Val::AnoFun(abs) => {
+        Val::AnoClient(abs) => {
             let (r#type, abs) = annotate_abs(ctx, abs, None)?;
             let mut ann = abs.tag.clone();
 
             ann.r#type = r#type;
 
             Ok(Tag {
-                item: Val::AnoFun(abs),
+                item: Val::AnoClient(abs),
                 tag: ann,
+            })
+        }
+
+        Val::App(caller, param) => {
+            let caller = annotate_val(ctx, val_ctx, *caller)?;
+            let param = annotate_val(ctx, val_ctx, *param)?;
+
+            if !caller.tag.r#type.inherits("Fn") {
+                return Err(Error {
+                    pos: caller.tag.pos,
+                    message: format!(
+                        "Expected a function but got '{}' instead",
+                        caller.tag.r#type,
+                    ),
+                });
+            }
+
+            let result_type = if let Some(result_type) = caller.tag.r#type.apply(&param.tag.r#type)
+            {
+                result_type
+            } else {
+                return Err(Error {
+                    pos: param.tag.pos,
+                    message: format!(
+                        "Expected type '{}' but got '{}' instead",
+                        caller.tag.r#type, param.tag.r#type
+                    ),
+                });
+            };
+
+            let pos = caller.tag.pos;
+
+            Ok(Tag {
+                item: Val::App(Box::new(caller), Box::new(param)),
+                tag: Ann {
+                    pos,
+                    r#type: result_type,
+                    used: Default::default(),
+                },
             })
         }
     }

@@ -76,7 +76,8 @@ pub enum Val<A> {
     Literal(Literal),
     Path(Vec<String>),
     Record(Record<Tag<Val<A>, A>>),
-    AnoFun(Tag<Abs<A>, A>),
+    AnoClient(Tag<Abs<A>, A>),
+    App(Box<Tag<Val<A>, A>>, Box<Tag<Val<A>, A>>),
 }
 
 impl<A> std::fmt::Display for Val<A> {
@@ -85,7 +86,11 @@ impl<A> std::fmt::Display for Val<A> {
             Val::Literal(l) => write!(f, "{}", l),
             Val::Path(p) => write!(f, "{}", p.join(".")),
             Val::Record(r) => write!(f, "{}", r),
-            Val::AnoFun(_) => write!(f, "<anonymous function>"),
+            Val::AnoClient(_) => write!(f, "<anonymous client>"),
+            Val::App(fun, a) => {
+                write!(f, "{} -> ", fun)?;
+                write!(f, "{}", a)
+            }
         }
     }
 }
@@ -153,6 +158,26 @@ impl Type {
             Type::App(outer, _) => outer.inherits(parent_name),
             Type::Anonymous => true,
             Type::Record(_) => false,
+        }
+    }
+
+    pub fn apply(&self, param: &Type) -> Option<Type> {
+        match self {
+            Type::App(caller, tail) => {
+                if !caller.inherits("Fn") {
+                    return None;
+                }
+
+                if let Type::App(exp_typ, result) = tail.as_ref() {
+                    if exp_typ.parent_type_of(param) {
+                        return Some(*result.clone());
+                    }
+                }
+
+                None
+            }
+
+            _ => None,
         }
     }
 
@@ -252,6 +277,17 @@ impl Type {
             name: "Process".to_string(),
             kind: 0,
         }
+    }
+
+    pub fn func(param: Type, result: Type) -> Self {
+        Type::App(
+            Box::new(Type::Name {
+                parent: vec![],
+                name: "Fn".to_string(),
+                kind: 2,
+            }),
+            Box::new(Type::App(Box::new(param), Box::new(result))),
+        )
     }
 
     pub fn named(name: impl AsRef<str>) -> Self {
