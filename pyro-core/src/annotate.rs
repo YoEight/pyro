@@ -98,7 +98,7 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
         Proc::Input(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag);
             let l = annotate_val(&mut ctx, ValCtx::Input, l)?;
-            let (pat_type, r) = annotate_abs(&mut ctx, r)?;
+            let (pat_type, r) = annotate_abs(&mut ctx, r, None)?;
 
             ann.used.extend(l.tag.used.clone());
             ann.used.extend(r.tag.used.clone());
@@ -178,8 +178,18 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
     }
 }
 
-fn annotate_abs(ctx: &mut Ctx, tag: Tag<Abs<Pos>, Pos>) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
+fn annotate_abs(
+    ctx: &mut Ctx,
+    tag: Tag<Abs<Pos>, Pos>,
+    named: Option<String>,
+) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
     let pattern = annotate_pattern(ctx, tag.item.pattern)?;
+
+    if let Some(def_name) = named {
+        ctx.variables
+            .insert(def_name, Type::client(pattern.tag.r#type.clone()));
+    }
+
     let proc = annotate_proc(ctx.clone(), *tag.item.proc)?;
     let mut ann = proc.tag.clone();
 
@@ -223,7 +233,7 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
             for def in defs {
-                let (r#type, abs) = annotate_abs(ctx, def.abs)?;
+                let (r#type, abs) = annotate_abs(ctx, def.abs, Some(def.name.clone()))?;
 
                 ctx.variables.insert(def.name.clone(), Type::client(r#type));
 
@@ -480,7 +490,7 @@ fn annotate_val(
         }
 
         Val::AnoFun(abs) => {
-            let (r#type, abs) = annotate_abs(ctx, abs)?;
+            let (r#type, abs) = annotate_abs(ctx, abs, None)?;
             let mut ann = abs.tag.clone();
 
             ann.r#type = r#type;
