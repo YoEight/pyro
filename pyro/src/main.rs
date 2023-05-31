@@ -188,9 +188,6 @@ fn execute_output(
     target: Tag<Val<Ann>, Ann>,
     param: Tag<Val<Ann>, Ann>,
 ) -> eyre::Result<Option<Suspend>> {
-    let pos = target.tag.pos;
-    let target_type = target.tag.r#type;
-    let param_type = param.tag.r#type;
     let target = if let Val::Path(path) = &target.item {
         let id = build_var_id(path.as_slice());
 
@@ -220,17 +217,6 @@ fn execute_output(
     };
 
     let value = resolve(scope, param.item)?;
-
-    if !param_type.typecheck(&target_type.inner_type()) {
-        eyre::bail!(
-            "{}:{}: Type mismatch, expected channel type to be {} but got {} instead",
-            pos.line,
-            pos.column,
-            target_type,
-            param_type,
-        );
-    }
-
     let _ = target.send(value);
 
     Ok(None)

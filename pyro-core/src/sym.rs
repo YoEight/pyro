@@ -49,22 +49,11 @@ pub enum Literal {
 
 impl Literal {
     pub fn typematch(&self, r#type: &Type) -> bool {
-        match (self, r#type) {
-            (Literal::Integer(_), Type::Name(name)) => name == "Int",
-            (Literal::String(_), Type::Name(name)) => name == "String",
-            (Literal::Char(_), Type::Name(name)) => name == "Char",
-            (Literal::Bool(_), Type::Name(name)) => name == "Bool",
-            (_, Type::Anonymous) => true,
-            _ => false,
-        }
-    }
-
-    pub fn r#type(&self) -> Type {
         match self {
-            Literal::Integer(_) => Type::Name("Int".to_string()),
-            Literal::String(_) => Type::Name("String".to_string()),
-            Literal::Char(_) => Type::Name("Char".to_string()),
-            Literal::Bool(_) => Type::Name("Bool".to_string()),
+            Literal::Integer(_) => Type::integer().parent_type_of(r#type),
+            Literal::String(_) => Type::string().parent_type_of(r#type),
+            Literal::Char(_) => Type::char().parent_type_of(r#type),
+            Literal::Bool(_) => Type::bool().parent_type_of(r#type),
         }
     }
 }

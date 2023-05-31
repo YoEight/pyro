@@ -1,4 +1,5 @@
 use crate::sym::Literal;
+use crate::{Error, Pos};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Program<A> {
@@ -97,24 +98,33 @@ pub struct Var {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
-    Name(String),
-    Channel(Box<Type>),
-    Client(Box<Type>),
-    Server(Box<Type>),
+    Name {
+        parent: Vec<Type>,
+        name: String,
+        kind: u16,
+    },
+    App(Box<Type>, Box<Type>),
     Anonymous,
     Record(Record<Type>),
-    Process,
 }
 
 impl Type {
-    pub fn typecheck(&self, other: &Type) -> bool {
-        match (self, other) {
-            (Type::Anonymous, _) => true,
-            (_, Type::Anonymous) => true,
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            Type::Name { name, .. } => Some(&name),
+            Type::App(_, inner) => inner.name(),
+            _ => None,
+        }
+    }
+    pub fn parent_type_of(&self, child: &Type) -> bool {
+        if let Some(name) = self.name() {
+            return child.inherits(name);
+        }
 
-            (Type::Record(a), Type::Record(b)) if a.props.len() == b.props.len() => {
-                for (a, b) in a.props.iter().zip(b.props.iter()) {
-                    if !a.val.typecheck(&b.val) {
+        match (self, child) {
+            (Type::Record(ra), Type::Record(rb)) if ra.props.len() == rb.props.len() => {
+                for (a, b) in ra.props.iter().zip(rb.props.iter()) {
+                    if a.label != b.label || !a.val.parent_type_of(&b.val) {
                         return false;
                     }
                 }
@@ -122,41 +132,182 @@ impl Type {
                 true
             }
 
-            (Type::Channel(a), Type::Channel(b) | Type::Client(b) | Type::Server(b)) => {
-                a.typecheck(b)
+            (Type::App(ca, ta), Type::App(cb, tb)) => {
+                ca.parent_type_of(cb) && ta.parent_type_of(tb)
             }
 
-            (Type::Client(a), Type::Client(b)) => a.typecheck(b),
-            (Type::Server(a), Type::Server(b)) => a.typecheck(b),
-            (a, b) => a == b,
+            _ => self == child,
         }
     }
 
-    pub fn inner_type(&self) -> Type {
-        if let Type::Channel(typ) = self {
-            return *typ.clone();
-        }
-
-        self.clone()
-    }
-
-    pub fn is_channel(&self) -> bool {
+    pub fn inherits(&self, parent_name: &str) -> bool {
         match self {
-            Type::Anonymous | Type::Channel(_) => true,
-            _ => false,
+            Type::Name { name, parent, .. } => {
+                if name == parent_name {
+                    return true;
+                }
+
+                parent.iter().any(|p| p.inherits(parent_name))
+            }
+
+            Type::App(outer, _) => outer.inherits(parent_name),
+            Type::Anonymous => true,
+            Type::Record(_) => false,
         }
+    }
+
+    pub fn kind(&self, location: Pos) -> crate::Result<u16> {
+        match self {
+            Type::Name { kind, .. } => Ok(*kind),
+            Type::Anonymous => Ok(0),
+            Type::Record(_) => Ok(0),
+
+            Type::App(l, r) => {
+                let l_kind = l.kind(location)?;
+                let r_kind = r.kind(location)?;
+
+                if l_kind < r_kind {
+                    return Err(Error {
+                        pos: location,
+                        message: "Kind mismatch".to_string(),
+                    });
+                }
+
+                Ok(l_kind - (1 + r_kind))
+            }
+        }
+    }
+
+    pub fn channel(r#type: Type) -> Self {
+        Type::App(Box::new(Type::channel_type()), Box::new(r#type))
+    }
+
+    pub fn channel_type() -> Self {
+        Type::Name {
+            parent: vec![Type::client_type(), Type::server_type()],
+            name: "Channel".to_string(),
+            kind: 1,
+        }
+    }
+
+    pub fn client(r#type: Type) -> Self {
+        Type::App(Box::new(Type::client_type()), Box::new(r#type))
+    }
+
+    pub fn client_type() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Client".to_string(),
+            kind: 1,
+        }
+    }
+
+    pub fn server(r#type: Type) -> Self {
+        Type::App(Box::new(Type::server_type()), Box::new(r#type))
+    }
+
+    pub fn server_type() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Server".to_string(),
+            kind: 1,
+        }
+    }
+
+    pub fn integer() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Integer".to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn string() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "String".to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn char() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Char".to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn bool() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Bool".to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn process() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Process".to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn named(name: impl AsRef<str>) -> Self {
+        Type::Name {
+            parent: vec![],
+            name: name.as_ref().to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn typecheck_client_call(&self, params: &Type) -> bool {
+        if !self.inherits("Client") {
+            return false;
+        }
+
+        let expected_msg_type = if let Type::App(_, msg_type) = self {
+            msg_type
+        } else {
+            unreachable!()
+        };
+
+        expected_msg_type.parent_type_of(params)
+    }
+
+    pub fn typecheck_server_call(&self, params: &Type) -> bool {
+        if !self.inherits("Server") {
+            return false;
+        }
+
+        let expected_msg_type = if let Type::App(_, msg_type) = self {
+            msg_type
+        } else {
+            unreachable!()
+        };
+
+        expected_msg_type.parent_type_of(params)
     }
 }
 
 impl std::fmt::Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::Name(n) => write!(f, "{}", n),
-            Type::Channel(t) => write!(f, "^{}", t),
-            Type::Client(t) => write!(f, "!{}", t),
-            Type::Server(t) => write!(f, "?{}", t),
-            Type::Anonymous => write!(f, "<anonymous>"), // TODO - we could implement universal type.
-            Type::Process => write!(f, "Process"), // TODO - we could implement universal type.
+            Type::Name { name, kind, .. } => match name.as_str() {
+                "Channel" => write!(f, "^"),
+                "Client" => write!(f, "!"),
+                "Server" => write!(f, "?"),
+                _ if *kind != 0 => write!(f, "{} ", name),
+                _ => write!(f, "{}", name),
+            },
+
+            Type::App(a, b) => {
+                a.fmt(f)?;
+                b.fmt(f)
+            }
+
+            Type::Anonymous => write!(f, "_"),
             Type::Record(r) => write!(f, "{}", r),
         }
     }

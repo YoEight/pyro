@@ -43,19 +43,17 @@ impl Ann {
 fn configure_context() -> Ctx {
     let mut ctx = Ctx::default();
 
-    ctx.variables.insert(
-        "print".to_string(),
-        Type::Channel(Box::new(Type::Name("String".to_string()))),
-    );
+    ctx.variables
+        .insert("print".to_string(), Type::client(Type::string()));
 
+    ctx.types.insert("String".to_string(), Type::string());
+    ctx.types.insert("Bool".to_string(), Type::bool());
+    ctx.types.insert("Integer".to_string(), Type::integer());
+    ctx.types.insert("Char".to_string(), Type::char());
+    ctx.types.insert("Client".to_string(), Type::client_type());
+    ctx.types.insert("Server".to_string(), Type::server_type());
     ctx.types
-        .insert("String".to_string(), Type::Name("String".to_string()));
-    ctx.types
-        .insert("Bool".to_string(), Type::Name("Bool".to_string()));
-    ctx.types
-        .insert("Integer".to_string(), Type::Name("Integer".to_string()));
-    ctx.types
-        .insert("Char".to_string(), Type::Name("Char".to_string()));
+        .insert("Channel".to_string(), Type::channel_type());
 
     ctx
 }
@@ -74,27 +72,19 @@ pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
 fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
-            let mut ann = Ann::with_type(Type::Process, proc.tag);
+            let mut ann = Ann::with_type(Type::process(), proc.tag);
             let l = annotate_val(&mut ctx, ValCtx::Output, l)?;
             let r = annotate_val(&mut ctx, ValCtx::Regular, r)?;
 
             ann.used.extend(l.tag.used.clone());
             ann.used.extend(r.tag.used.clone());
 
-            if !l.tag.r#type.is_channel() {
-                return Err(Error {
-                    pos: l.tag.pos,
-                    message: format!("'{}' must be a channel", l.item),
-                });
-            }
-
-            if !l.tag.r#type.inner_type().typecheck(&r.tag.r#type) {
+            if !l.tag.r#type.typecheck_client_call(&r.tag.r#type) {
                 return Err(Error {
                     pos: r.tag.pos,
                     message: format!(
                         "Expected type '{}' but got '{}' instead",
-                        l.tag.r#type.inner_type(),
-                        r.tag.r#type
+                        l.tag.r#type, r.tag.r#type
                     ),
                 });
             }
@@ -106,27 +96,19 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
         }
 
         Proc::Input(l, r) => {
-            let mut ann = Ann::with_type(Type::Process, proc.tag);
+            let mut ann = Ann::with_type(Type::process(), proc.tag);
             let l = annotate_val(&mut ctx, ValCtx::Input, l)?;
             let (pat_type, r) = annotate_abs(&mut ctx, r)?;
 
             ann.used.extend(l.tag.used.clone());
             ann.used.extend(r.tag.used.clone());
 
-            if !l.tag.r#type.is_channel() {
-                return Err(Error {
-                    pos: l.tag.pos,
-                    message: format!("'{}' must be a channel", l.item),
-                });
-            }
-
-            if !l.tag.r#type.inner_type().typecheck(&pat_type) {
+            if !l.tag.r#type.typecheck_server_call(&pat_type) {
                 return Err(Error {
                     pos: r.tag.pos,
                     message: format!(
                         "Expected type '{}' but got '{}' instead",
-                        l.tag.r#type.inner_type(),
-                        pat_type
+                        l.tag.r#type, pat_type
                     ),
                 });
             }
@@ -139,11 +121,11 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
 
         Proc::Null => Ok(Tag {
             item: Proc::Null,
-            tag: Ann::with_type(Type::Process, proc.tag),
+            tag: Ann::with_type(Type::process(), proc.tag),
         }),
 
         Proc::Parallel(ps) => {
-            let mut ann = Ann::with_type(Type::Process, proc.tag);
+            let mut ann = Ann::with_type(Type::process(), proc.tag);
             let mut new_ps = Vec::new();
 
             for p in ps {
@@ -163,7 +145,7 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
             let d = annotate_decl(&mut ctx, d)?;
             let p = annotate_proc(ctx.clone(), *p)?;
             let mut tag = p.tag.clone();
-            tag.r#type = Type::Process;
+            tag.r#type = Type::process();
 
             Ok(Tag {
                 item: Proc::Decl(d, Box::new(p)),
@@ -174,14 +156,14 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
         Proc::Cond(val, if_proc, else_proc) => {
             let val = annotate_val(&mut ctx, ValCtx::Regular, val)?;
 
-            if !val.tag.r#type.typecheck(&Type::Name("Bool".to_string())) {
+            if !Type::bool().parent_type_of(&val.tag.r#type) {
                 return Err(Error {
                     pos: val.tag.pos,
                     message: format!("Expected type 'Bool' but got '{}' instead", val.tag.r#type),
                 });
             }
 
-            let mut ann = Ann::with_type(Type::Process, proc.tag);
+            let mut ann = Ann::with_type(Type::process(), proc.tag);
             let if_proc = annotate_proc(ctx.clone(), *if_proc)?;
             let else_proc = annotate_proc(ctx.clone(), *else_proc)?;
 
@@ -243,8 +225,7 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
             for def in defs {
                 let (r#type, abs) = annotate_abs(ctx, def.abs)?;
 
-                ctx.variables
-                    .insert(def.name.clone(), Type::Channel(Box::new(r#type)));
+                ctx.variables.insert(def.name.clone(), Type::client(r#type));
 
                 new_defs.push(Def {
                     name: def.name,
@@ -260,9 +241,9 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
 }
 
 fn resolve_type(ctx: &Ctx, pos: Pos, r#type: Type) -> Result<Type> {
-    match r#type {
-        Type::Name(n) => {
-            if let Some(rn) = ctx.types.get(&n) {
+    match r#type.name() {
+        Some(n) => {
+            if let Some(rn) = ctx.types.get(n) {
                 Ok(rn.clone())
             } else {
                 Err(Error {
@@ -272,27 +253,24 @@ fn resolve_type(ctx: &Ctx, pos: Pos, r#type: Type) -> Result<Type> {
             }
         }
 
-        Type::Channel(r#type) => {
-            let rn = resolve_type(ctx, pos, *r#type)?;
-            Ok(Type::Channel(Box::new(rn)))
+        _ => {
+            if let Type::Record(rec) = r#type {
+                let rec = rec.traverse_result(|t| resolve_type(ctx, pos, t))?;
+
+                Ok(Type::Record(rec))
+            } else {
+                Ok(r#type)
+            }
         }
-
-        Type::Record(rec) => {
-            let rec = rec.traverse_result(|t| resolve_type(ctx, pos, t))?;
-
-            Ok(Type::Record(rec))
-        }
-
-        r#type => Ok(r#type),
     }
 }
 
 fn literal_type(lit: &Literal) -> Type {
     match lit {
-        Literal::Integer(_) => Type::Name("Integer".to_string()),
-        Literal::String(_) => Type::Name("String".to_string()),
-        Literal::Char(_) => Type::Name("Char".to_string()),
-        Literal::Bool(_) => Type::Name("Bool".to_string()),
+        Literal::Integer(_) => Type::integer(),
+        Literal::String(_) => Type::string(),
+        Literal::Char(_) => Type::char(),
+        Literal::Bool(_) => Type::bool(),
     }
 }
 
@@ -356,7 +334,9 @@ fn annotate_pat_var(
         pat_var.var.r#type = resolve_type(&ctx, pos, pat_var.var.r#type)?;
         let pat = annotate_pattern(ctx, param)?;
 
-        if pat_var.var.r#type != Type::Anonymous && !pat.tag.r#type.typecheck(&pat_var.var.r#type) {
+        if pat_var.var.r#type != Type::Anonymous
+            && !pat_var.var.r#type.parent_type_of(&pat.tag.r#type)
+        {
             return Err(Error {
                 pos,
                 message: format!(

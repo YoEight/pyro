@@ -240,11 +240,11 @@ fn test_parse_record_type() {
         props: vec![
             Prop {
                 label: Some("a".to_string()),
-                val: Type::Name("Foo".to_string()),
+                val: Type::named("Foo"),
             },
             Prop {
                 label: None,
-                val: Type::Name("Baz".to_string()),
+                val: Type::named("Baz"),
             },
         ]
         .into(),
@@ -304,7 +304,7 @@ fn test_parse_new_channel() {
     let mut state = ParserState::new(tokens.as_slice());
     let ast = state.parse_decl().unwrap();
 
-    let expected = Decl::Channels(vec![("stream".to_string(), Type::Name("Bool".to_string()))]);
+    let expected = Decl::Channels(vec![("stream".to_string(), Type::named("Bool"))]);
 
     assert_eq!(expected, ast);
     assert_eq!(state.look_ahead().item(), &Sym::EOF);
@@ -320,25 +320,25 @@ fn test_parse_type_decl() {
 
     let expected = Decl::Type(
         "Foobar".to_string(),
-        Type::Channel(Box::new(Type::Record(Record {
+        Type::channel(Type::Record(Record {
             props: vec![
                 Prop {
                     label: Some("too".to_string()),
-                    val: Type::Name("String".to_string()),
+                    val: Type::named("String"),
                 },
                 Prop {
                     label: None,
-                    val: Type::Channel(Box::new(Type::Record(Record {
+                    val: Type::channel(Type::Record(Record {
                         props: vec![Prop {
                             label: None,
-                            val: Type::Name("Int".to_string()),
+                            val: Type::named("Int"),
                         }]
                         .into(),
-                    }))),
+                    })),
                 },
             ]
             .into(),
-        }))),
+        })),
     );
 
     assert_eq!(expected, ast);
@@ -370,7 +370,7 @@ fn test_parse_defs() {
                                         item: Pat::Var(PatVar {
                                             var: Var {
                                                 id: "b".to_string(),
-                                                r#type: Type::Name("Boolean".to_string()),
+                                                r#type: Type::named("Boolean"),
                                             },
                                             pattern: None,
                                         }),
@@ -487,7 +487,7 @@ fn test_parse_defs() {
                                         item: Pat::Var(PatVar {
                                             var: Var {
                                                 id: "b".to_string(),
-                                                r#type: Type::Name("Boolean".to_string()),
+                                                r#type: Type::named("Boolean"),
                                             },
                                             pattern: None,
                                         }),

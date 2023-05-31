@@ -164,7 +164,7 @@ impl<'a> ParserState<'a> {
             match token.item() {
                 Sym::Type(s) => {
                     self.shift();
-                    break Type::Name(s.clone());
+                    break Type::named(s);
                 }
 
                 Sym::Punctuation(p)
@@ -198,9 +198,9 @@ impl<'a> ParserState<'a> {
 
         while let Some(constr) = constrs.pop() {
             match constr {
-                Constr::InOut => r#type = Type::Channel(Box::new(r#type)),
-                Constr::In => r#type = Type::Server(Box::new(r#type)),
-                Constr::Out => r#type = Type::Client(Box::new(r#type)),
+                Constr::InOut => r#type = Type::channel(r#type),
+                Constr::In => r#type = Type::server(r#type),
+                Constr::Out => r#type = Type::client(r#type),
             }
         }
 
