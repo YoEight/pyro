@@ -239,6 +239,42 @@ impl<'a> ParserState<'a> {
                 })
             }
 
+            Sym::Punctuation(Punctuation::LParen) => {
+                let pos = self.pos();
+                self.shift();
+                self.skip_spaces();
+                let mut caller = self.parse_value()?;
+                self.skip_spaces();
+                let mut params = self.parse_value()?;
+                loop {
+                    self.skip_spaces();
+                    let chk = self.clone();
+
+                    match self.parse_value() {
+                        Err(_) => {
+                            *self = chk;
+                            break;
+                        }
+
+                        Ok(value) => {
+                            caller = Tag {
+                                tag: pos,
+                                item: Val::App(Box::new(caller), Box::new(params)),
+                            };
+
+                            params = value;
+                        }
+                    }
+                }
+
+                self.expect_punctuation(Punctuation::RParen)?;
+
+                Ok(Tag {
+                    item: Val::App(Box::new(caller), Box::new(params)),
+                    tag: pos,
+                })
+            }
+
             _ => Err(Error {
                 pos: token.pos,
                 message: format!("Expected parsing a value but got {} instead", token.item),

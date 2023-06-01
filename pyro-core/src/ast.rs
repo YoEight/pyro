@@ -121,7 +121,20 @@ impl Type {
             _ => None,
         }
     }
+
+    pub fn inner_type(&self) -> Self {
+        if let Type::App(_, r) = self {
+            return r.as_ref().clone();
+        }
+
+        self.clone()
+    }
+
     pub fn parent_type_of(&self, child: &Type) -> bool {
+        if self == &Type::Anonymous || child == &Type::Anonymous {
+            return true;
+        }
+
         if let Some(name) = self.name() {
             return child.inherits(name);
         }
@@ -304,9 +317,9 @@ impl Type {
         }
 
         let expected_msg_type = if let Type::App(_, msg_type) = self {
-            msg_type
+            msg_type.as_ref()
         } else {
-            unreachable!()
+            self
         };
 
         expected_msg_type.parent_type_of(params)

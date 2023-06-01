@@ -152,39 +152,12 @@ impl<'a> Tokenizer<'a> {
                 ')' => self.consume(chars, Sym::Punctuation(Punctuation::RParen)),
                 '@' => self.consume(chars, Sym::At),
                 '_' => self.consume(chars, Sym::Underscore),
-                '+' => self.consume(chars, Sym::Plus),
-                '-' => self.consume(chars, Sym::Minus),
-                '*' => self.consume(chars, Sym::Mul),
-                '/' => self.consume(chars, Sym::Div),
                 '\\' => self.consume(chars, Sym::BackSlash),
-                '%' => self.consume(chars, Sym::Mod),
                 '|' => self.consume(chars, Sym::Punctuation(Punctuation::Pipe)),
 
                 '!' => {
                     chars.next();
-                    if let Some('=') = chars.peek() {
-                        return self.consume(chars, Sym::Neq);
-                    }
-
                     Ok(Some(Sym::Punctuation(Punctuation::ExclamationMark)))
-                }
-
-                '>' => {
-                    chars.next();
-                    if let Some('=') = chars.peek() {
-                        return self.consume(chars, Sym::GtEq);
-                    }
-
-                    Ok(Some(Sym::Gt))
-                }
-
-                '<' => {
-                    chars.next();
-                    if let Some('=') = chars.peek() {
-                        return self.consume(chars, Sym::LtEq);
-                    }
-
-                    Ok(Some(Sym::Lt))
                 }
 
                 '"' => {
@@ -217,20 +190,33 @@ impl<'a> Tokenizer<'a> {
                 '=' => {
                     chars.next();
                     if let Some('=') = chars.peek() {
-                        return self.consume(chars, Sym::DoubleEq);
+                        return self.consume(chars, Sym::Id("==".to_string()));
                     }
 
                     Ok(Some(Sym::Eq))
                 }
 
-                _ if ch.is_ascii_lowercase() && ch.is_ascii_alphabetic() => {
+                _ if !ch.is_ascii_digit() && !ch.is_ascii_uppercase() => {
                     let mut ident = String::new();
 
                     ident.push(*ch);
                     chars.next();
 
                     while let Some(ch) = chars.peek() {
-                        if !ch.is_ascii_alphanumeric() {
+                        if *ch == '"'
+                            || *ch == '!'
+                            || *ch == '^'
+                            || *ch == '?'
+                            || *ch == '['
+                            || *ch == ']'
+                            || *ch == '('
+                            || *ch == ')'
+                            || *ch == '}'
+                            || *ch == '{'
+                            || *ch == ':'
+                            || *ch == ','
+                            || ch.is_ascii_whitespace()
+                        {
                             break;
                         }
 

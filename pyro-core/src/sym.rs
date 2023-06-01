@@ -142,30 +142,8 @@ pub enum Sym {
     Whitespace,
     /// `\n`
     Newline,
-    /// Double equals sign `==`
-    DoubleEq,
     /// Equality operator `=`
     Eq,
-    /// Not Equals operator `!=`
-    Neq,
-    /// Less Than operator `<`
-    Lt,
-    /// Greater Than operator `>`
-    Gt,
-    /// Less Than Or Equals operator `<=`
-    LtEq,
-    /// Greater Than Or Equals operator `>=`
-    GtEq,
-    /// Plus operator `+`
-    Plus,
-    /// Minus operator `-`
-    Minus,
-    /// Multiplication operator `*`
-    Mul,
-    /// Division operator `/`
-    Div,
-    /// Modulo Operator `%`
-    Mod,
     /// `@`
     At,
     /// `_`
@@ -185,18 +163,7 @@ impl Display for Sym {
             Sym::Keyword(k) => k.as_str(),
             Sym::Whitespace => " ",
             Sym::Newline => "\\n",
-            Sym::DoubleEq => "==",
             Sym::Eq => "=",
-            Sym::Neq => "!=",
-            Sym::Lt => "<",
-            Sym::Gt => ">",
-            Sym::LtEq => "<=",
-            Sym::GtEq => ">=",
-            Sym::Plus => "+",
-            Sym::Minus => "-",
-            Sym::Mul => "*",
-            Sym::Div => "/",
-            Sym::Mod => "%",
             Sym::At => "@",
             Sym::Underscore => "_",
             Sym::BackSlash => "\\",

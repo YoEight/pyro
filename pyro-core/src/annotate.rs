@@ -46,6 +46,19 @@ fn configure_context() -> Ctx {
     ctx.variables
         .insert("print".to_string(), Type::client(Type::string()));
 
+    ctx.variables.insert(
+        "+".to_string(),
+        Type::func(
+            Type::integer(),
+            Type::func(Type::integer(), Type::integer()),
+        ),
+    );
+
+    ctx.variables.insert(
+        "<=".to_string(),
+        Type::func(Type::integer(), Type::func(Type::integer(), Type::bool())),
+    );
+
     ctx.types.insert("String".to_string(), Type::string());
     ctx.types.insert("Bool".to_string(), Type::bool());
     ctx.types.insert("Integer".to_string(), Type::integer());
@@ -73,8 +86,8 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
     match proc.item {
         Proc::Output(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let l = annotate_val(&mut ctx, ValCtx::Output, l)?;
-            let r = annotate_val(&mut ctx, ValCtx::Regular, r)?;
+            let mut l = annotate_val(&mut ctx, ValCtx::Output, l)?;
+            let mut r = annotate_val(&mut ctx, ValCtx::Regular, r)?;
 
             ann.used.extend(l.tag.used.clone());
             ann.used.extend(r.tag.used.clone());
@@ -84,9 +97,16 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
                     pos: r.tag.pos,
                     message: format!(
                         "Expected type '{}' but got '{}' instead",
-                        l.tag.r#type, r.tag.r#type
+                        l.tag.r#type.inner_type(),
+                        r.tag.r#type
                     ),
                 });
+            }
+
+            if l.tag.r#type == Type::Anonymous {
+                l.tag.r#type = Type::client(r.tag.r#type.clone());
+            } else if r.tag.r#type == Type::Anonymous {
+                r.tag.r#type = l.tag.r#type.inner_type();
             }
 
             Ok(Tag {
@@ -167,6 +187,7 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
             let if_proc = annotate_proc(ctx.clone(), *if_proc)?;
             let else_proc = annotate_proc(ctx.clone(), *else_proc)?;
 
+            ann.used.extend(val.tag.used.clone());
             ann.used.extend(if_proc.tag.used.clone());
             ann.used.extend(else_proc.tag.used.clone());
 
@@ -493,7 +514,7 @@ fn annotate_val(
             let (r#type, abs) = annotate_abs(ctx, abs, None)?;
             let mut ann = abs.tag.clone();
 
-            ann.r#type = r#type;
+            ann.r#type = Type::client(r#type);
 
             Ok(Tag {
                 item: Val::AnoClient(abs),
@@ -528,15 +549,14 @@ fn annotate_val(
                 });
             };
 
-            let pos = caller.tag.pos;
+            let mut ann = Ann::with_type(result_type, caller.tag.pos);
+
+            ann.used.extend(caller.tag.used.clone());
+            ann.used.extend(param.tag.used.clone());
 
             Ok(Tag {
                 item: Val::App(Box::new(caller), Box::new(param)),
-                tag: Ann {
-                    pos,
-                    r#type: result_type,
-                    used: Default::default(),
-                },
+                tag: ann,
             })
         }
     }

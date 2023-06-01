@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,13 +35,14 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-fn default_scope() -> Scope {
+type PyroPrint = UnboundedSender<RuntimeValue>;
+
+fn default_scope(print_output: PyroPrint) -> Scope {
     let mut scope = Scope::default();
-    let (print_output, mut print_input) = mpsc::unbounded_channel();
 
     scope.insert(
         "print".to_string(),
-        RuntimeValue::Channel(Channel::Client(print_output)),
+        RuntimeValue::Channel(Channel::Client(print_output.clone())),
     );
 
     scope.insert(
@@ -59,13 +60,20 @@ fn default_scope() -> Scope {
         })),
     );
 
-    tokio::spawn(async move {
-        while let Some(value) = print_input.recv().await {
-            if let RuntimeValue::Literal(Literal::String(s)) = value {
-                println!("{}", s);
-            }
-        }
-    });
+    scope.insert(
+        "<=".to_string(),
+        RuntimeValue::Fun(Arc::new(|a| {
+            RuntimeValue::Fun(Arc::new(move |b| match (a.clone(), b.clone()) {
+                (
+                    RuntimeValue::Literal(Literal::Integer(a)),
+                    RuntimeValue::Literal(Literal::Integer(b)),
+                ) => RuntimeValue::Literal(Literal::Bool(a <= b)),
+
+                // Code has been type-checked prior to execution!
+                _ => unreachable!(),
+            }))
+        })),
+    );
 
     scope
 }
@@ -76,7 +84,22 @@ async fn execute(progs: Vec<Tag<Proc<Ann>, Ann>>) -> eyre::Result<()> {
         Completed(u64),
     }
 
-    let default_scope = default_scope();
+    let (print_output, mut print_input) = mpsc::unbounded_channel();
+
+    tokio::spawn(async move {
+        while let Some(value) = print_input.recv().await {
+            if let RuntimeValue::Literal(lit) = value {
+                match lit {
+                    Literal::Integer(n) => println!("{}", n),
+                    Literal::String(s) => println!("{}", s),
+                    Literal::Char(c) => println!("'{}'", c),
+                    Literal::Bool(b) => println!("{}", b),
+                }
+            }
+        }
+    });
+
+    let default_scope = default_scope(print_output.clone());
     let mut work_items = Vec::new();
     let (sender, mut mailbox) = mpsc::unbounded_channel::<Msg>();
 
@@ -97,13 +120,22 @@ async fn execute(progs: Vec<Tag<Proc<Ann>, Ann>>) -> eyre::Result<()> {
                     let proc_id = proc_id_gen;
                     proc_id_gen += 1;
 
+                    let print = print_output.clone();
                     tokio::spawn(async move {
-                        for next in execute_proc(s.scope, s.proc).await? {
-                            let _ = out.send(Msg::Job(out.clone(), next));
-                        }
+                        match execute_proc(s.scope, s.proc).await {
+                            Err(e) => {
+                                let msg = format!("UNEXPECTED RUNTIME ERROR: {}", e);
+                                let _ = print.send(RuntimeValue::Literal(Literal::String(msg)));
+                            }
+
+                            Ok(jobs) => {
+                                for next in jobs {
+                                    let _ = out.send(Msg::Job(out.clone(), next));
+                                }
+                            }
+                        };
 
                         let _ = out.send(Msg::Completed(proc_id));
-                        Ok::<_, eyre::Error>(())
                     });
 
                     gauge += 1;
@@ -242,7 +274,7 @@ async fn execute_input(
     source: Tag<Val<Ann>, Ann>,
     abs: Tag<Abs<Ann>, Ann>,
 ) -> eyre::Result<Option<Suspend>> {
-    let source = if let Val::Path(path) = &source.item {
+    let receiver = if let Val::Path(path) = &source.item {
         let id = build_var_id(path.as_slice());
         to_server(scope.look_up(&id)?)?
     } else {
@@ -252,8 +284,8 @@ async fn execute_input(
         );
     };
 
-    scope.retain(|name| abs.tag.used.contains_key(name));
-    let mut recv = source.lock().await;
+    scope.keeps(abs.tag.used.keys());
+    let mut recv = receiver.lock().await;
     if let Some(value) = recv.recv().await {
         update_scope(scope, &value, abs.item.pattern.item.clone());
 
@@ -383,11 +415,37 @@ impl Scope {
         }
     }
 
-    fn retain<F>(&mut self, fun: F)
+    fn keeps<'a, I>(&mut self, keys: I)
     where
-        F: Fn(&str) -> bool,
+        I: Iterator<Item = &'a String>,
     {
-        self.variables.retain(|key, _| fun(key))
+        let mut set = HashSet::new();
+        let mut stack = Vec::new();
+
+        for key in keys {
+            set.insert(key.clone());
+
+            if let Some(value) = self.variables.get(key) {
+                if let RuntimeValue::Abs(abs) = value {
+                    stack.push(abs.tag.used.keys().cloned());
+                }
+            }
+        }
+
+        while let Some(deps) = stack.pop() {
+            for dep in deps {
+                if set.contains(&dep) {
+                    continue;
+                }
+
+                set.insert(dep.clone());
+                if let Some(RuntimeValue::Abs(abs)) = self.variables.get(&dep) {
+                    stack.push(abs.tag.used.keys().cloned());
+                }
+            }
+        }
+
+        self.variables.retain(|k, _| set.contains(k));
     }
 
     fn register_def(&mut self, def: Def<Ann>) {
