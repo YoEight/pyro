@@ -157,7 +157,30 @@ impl<'a> Tokenizer<'a> {
 
                 '!' => {
                     chars.next();
+
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, Sym::Id("!=".to_string()));
+                    }
+
                     Ok(Some(Sym::Punctuation(Punctuation::ExclamationMark)))
+                }
+
+                '<' => {
+                    chars.next();
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, Sym::Id("<=".to_string()));
+                    }
+
+                    Ok(Some(Sym::Id("<".to_string())))
+                }
+
+                '>' => {
+                    chars.next();
+                    if let Some('=') = chars.peek() {
+                        return self.consume(chars, Sym::Id(">=".to_string()));
+                    }
+
+                    Ok(Some(Sym::Id(">".to_string())))
                 }
 
                 '"' => {
@@ -187,6 +210,16 @@ impl<'a> Tokenizer<'a> {
                     })
                 }
 
+                '+' => {
+                    chars.next();
+                    Ok(Some(Sym::Id("+".to_string())))
+                }
+
+                '-' => {
+                    chars.next();
+                    Ok(Some(Sym::Id("-".to_string())))
+                }
+
                 '=' => {
                     chars.next();
                     if let Some('=') = chars.peek() {
@@ -196,27 +229,14 @@ impl<'a> Tokenizer<'a> {
                     Ok(Some(Sym::Eq))
                 }
 
-                _ if !ch.is_ascii_digit() && !ch.is_ascii_uppercase() => {
+                _ if ch.is_ascii_lowercase() => {
                     let mut ident = String::new();
 
                     ident.push(*ch);
                     chars.next();
 
                     while let Some(ch) = chars.peek() {
-                        if *ch == '"'
-                            || *ch == '!'
-                            || *ch == '^'
-                            || *ch == '?'
-                            || *ch == '['
-                            || *ch == ']'
-                            || *ch == '('
-                            || *ch == ')'
-                            || *ch == '}'
-                            || *ch == '{'
-                            || *ch == ':'
-                            || *ch == ','
-                            || ch.is_ascii_whitespace()
-                        {
+                        if !ch.is_ascii_alphanumeric() && *ch != '_' {
                             break;
                         }
 
