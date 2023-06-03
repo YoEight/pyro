@@ -599,12 +599,16 @@ impl<'a> ParserState<'a> {
         let mut defs = Vec::new();
 
         loop {
+            let pos = self.pos();
             let id = self.parse_id()?;
             self.skip_spaces();
             let abs = self.parse_abs()?;
             self.skip_spaces();
 
-            defs.push(Def { name: id, abs });
+            defs.push(Tag {
+                item: Def { name: id, abs },
+                tag: pos,
+            });
 
             if !self.next_keyword(Keyword::And) {
                 break;
@@ -643,13 +647,17 @@ impl<'a> ParserState<'a> {
             self.expect_keyword(Keyword::New)?;
             self.skip_spaces();
 
+            let pos = self.pos();
             let id = self.parse_id()?;
             self.skip_spaces();
             self.expect_punctuation(Punctuation::Colon)?;
             self.skip_spaces();
             let r#type = self.parse_type()?;
 
-            chans.push((id, r#type));
+            chans.push(Tag {
+                item: (id, r#type),
+                tag: pos,
+            });
         }
 
         Ok(Decl::Channels(chans))

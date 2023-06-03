@@ -395,7 +395,8 @@ impl Scope {
     fn register(&mut self, decl: Decl<Ann>) {
         match decl {
             Decl::Channels(chans) => {
-                for (name, _) in chans {
+                for chan_tag in chans {
+                    let (name, _) = chan_tag.item;
                     let (output, input) = mpsc::unbounded_channel();
                     let input = Arc::new(Mutex::new(input));
 

@@ -12,15 +12,6 @@ pub struct Tag<I, A> {
     pub tag: A,
 }
 
-impl<I, A> Tag<Box<I>, A> {
-    pub fn unbox(self) -> Tag<I, A> {
-        Tag {
-            item: *self.item,
-            tag: self.tag,
-        }
-    }
-}
-
 impl<I, A> std::fmt::Display for Tag<I, A>
 where
     I: std::fmt::Display,
@@ -495,7 +486,7 @@ pub struct Def<A> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl<A> {
-    Channels(Vec<(String, Type)>),
-    Def(Vec<Def<A>>),
+    Channels(Vec<Tag<(String, Type), A>>),
+    Def(Vec<Tag<Def<A>, A>>),
     Type(String, Type),
 }

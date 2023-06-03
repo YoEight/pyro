@@ -307,17 +307,21 @@ fn annotate_decl(
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
 
-            for (n, t) in cs {
+            for decl_tag in cs {
+                let (n, t) = decl_tag.item;
                 let t = resolve_type(&ctx, &scope, decl.tag, t)?;
 
                 if !ctx.declare(&scope, &n, t.clone()) {
                     return Err(Error {
-                        pos: decl.tag,
+                        pos: decl_tag.tag,
                         message: format!("Channel '{}' already exists", n),
                     });
                 }
 
-                chans.push((n, t));
+                chans.push(Tag {
+                    item: (n, t.clone()),
+                    tag: Ann::with_type(t, decl_tag.tag),
+                });
             }
 
             Decl::Channels(chans)
@@ -331,12 +335,20 @@ fn annotate_decl(
 
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
-            for def in defs {
-                let (_, abs) = annotate_abs(ctx, scope, def.abs, Some(def.name.clone()))?;
+            for def_tag in defs {
+                let (r#type, abs) = annotate_abs(
+                    ctx,
+                    scope,
+                    def_tag.item.abs,
+                    Some(def_tag.item.name.clone()),
+                )?;
 
-                new_defs.push(Def {
-                    name: def.name,
-                    abs,
+                new_defs.push(Tag {
+                    item: Def {
+                        name: def_tag.item.name,
+                        abs,
+                    },
+                    tag: Ann::with_type(r#type, def_tag.tag),
                 });
             }
 

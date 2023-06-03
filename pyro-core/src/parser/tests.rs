@@ -304,7 +304,10 @@ fn test_parse_new_channel() {
     let mut state = ParserState::new(tokens.as_slice());
     let ast = state.parse_decl().unwrap();
 
-    let expected = Decl::Channels(vec![("stream".to_string(), Type::named("Bool"))]);
+    let expected = Decl::Channels(vec![Tag {
+        item: ("stream".to_string(), Type::named("Bool")),
+        tag: Pos { line: 1, column: 5 },
+    }]);
 
     assert_eq!(expected, ast);
     assert_eq!(state.look_ahead().item(), &Sym::EOF);
@@ -355,239 +358,249 @@ fn test_parse_defs() {
 
     let expected = Decl::Def(
         vec![
-            Def {
-                name: "tt".to_string(),
-                abs: Tag {
-                    tag: Pos { line: 1, column: 7 },
-                    item: Abs {
-                        pattern: Tag {
-                            tag: Pos { line: 1, column: 7 },
-                            item: Pat::Record(Record {
-                                props: vec![Prop {
-                                    label: None,
-                                    val: Tag {
-                                        tag: Pos { line: 1, column: 8 },
-                                        item: Pat::Var(PatVar {
-                                            var: Var {
-                                                id: "b".to_string(),
-                                                r#type: Type::named("Boolean"),
-                                            },
-                                            pattern: None,
-                                        }),
-                                    },
-                                }]
-                                .into(),
-                            }),
-                        },
-                        proc: Box::new(Tag {
-                            tag: Pos {
-                                line: 1,
-                                column: 21,
-                            },
-                            item: Proc::Input(
-                                Tag {
-                                    item: Val::Path(vec!["b".to_string()].into()),
-                                    tag: Pos {
-                                        line: 1,
-                                        column: 21,
-                                    },
-                                },
-                                Tag {
-                                    item: Abs {
-                                        pattern: Tag {
-                                            tag: Pos {
-                                                line: 1,
-                                                column: 23,
-                                            },
-                                            item: Pat::Record(Record {
-                                                props: vec![
-                                                    Prop {
-                                                        label: None,
-                                                        val: Tag {
-                                                            tag: Pos {
-                                                                line: 1,
-                                                                column: 24,
-                                                            },
-                                                            item: Pat::Var(PatVar {
-                                                                var: Var {
-                                                                    id: "t".to_string(),
-                                                                    r#type: Type::Anonymous,
-                                                                },
-                                                                pattern: None,
-                                                            }),
-                                                        },
-                                                    },
-                                                    Prop {
-                                                        label: None,
-                                                        val: Tag {
-                                                            tag: Pos {
-                                                                line: 1,
-                                                                column: 26,
-                                                            },
-                                                            item: Pat::Var(PatVar {
-                                                                var: Var {
-                                                                    id: "f".to_string(),
-                                                                    r#type: Type::Anonymous,
-                                                                },
-                                                                pattern: None,
-                                                            }),
-                                                        },
-                                                    },
-                                                ]
-                                                .into(),
+            Tag {
+                item: Def {
+                    name: "tt".to_string(),
+                    abs: Tag {
+                        tag: Pos { line: 1, column: 7 },
+                        item: Abs {
+                            pattern: Tag {
+                                tag: Pos { line: 1, column: 7 },
+                                item: Pat::Record(Record {
+                                    props: vec![Prop {
+                                        label: None,
+                                        val: Tag {
+                                            tag: Pos { line: 1, column: 8 },
+                                            item: Pat::Var(PatVar {
+                                                var: Var {
+                                                    id: "b".to_string(),
+                                                    r#type: Type::named("Boolean"),
+                                                },
+                                                pattern: None,
                                             }),
                                         },
-                                        proc: Box::new(Tag {
-                                            tag: Pos {
-                                                line: 1,
-                                                column: 31,
-                                            },
-                                            item: Proc::Output(
-                                                Tag {
-                                                    item: Val::Path(vec!["t".to_string()].into()),
-                                                    tag: Pos {
-                                                        line: 1,
-                                                        column: 31,
-                                                    },
-                                                },
-                                                Tag {
-                                                    item: Val::Record(Record {
-                                                        props: vec![].into(),
-                                                    }),
-                                                    tag: Pos {
-                                                        line: 1,
-                                                        column: 33,
-                                                    },
-                                                },
-                                            ),
-                                        }),
-                                    },
-                                    tag: Pos {
-                                        line: 1,
-                                        column: 23,
-                                    },
+                                    }]
+                                    .into(),
+                                }),
+                            },
+                            proc: Box::new(Tag {
+                                tag: Pos {
+                                    line: 1,
+                                    column: 21,
                                 },
-                            ),
-                        }),
+                                item: Proc::Input(
+                                    Tag {
+                                        item: Val::Path(vec!["b".to_string()].into()),
+                                        tag: Pos {
+                                            line: 1,
+                                            column: 21,
+                                        },
+                                    },
+                                    Tag {
+                                        item: Abs {
+                                            pattern: Tag {
+                                                tag: Pos {
+                                                    line: 1,
+                                                    column: 23,
+                                                },
+                                                item: Pat::Record(Record {
+                                                    props: vec![
+                                                        Prop {
+                                                            label: None,
+                                                            val: Tag {
+                                                                tag: Pos {
+                                                                    line: 1,
+                                                                    column: 24,
+                                                                },
+                                                                item: Pat::Var(PatVar {
+                                                                    var: Var {
+                                                                        id: "t".to_string(),
+                                                                        r#type: Type::Anonymous,
+                                                                    },
+                                                                    pattern: None,
+                                                                }),
+                                                            },
+                                                        },
+                                                        Prop {
+                                                            label: None,
+                                                            val: Tag {
+                                                                tag: Pos {
+                                                                    line: 1,
+                                                                    column: 26,
+                                                                },
+                                                                item: Pat::Var(PatVar {
+                                                                    var: Var {
+                                                                        id: "f".to_string(),
+                                                                        r#type: Type::Anonymous,
+                                                                    },
+                                                                    pattern: None,
+                                                                }),
+                                                            },
+                                                        },
+                                                    ]
+                                                    .into(),
+                                                }),
+                                            },
+                                            proc: Box::new(Tag {
+                                                tag: Pos {
+                                                    line: 1,
+                                                    column: 31,
+                                                },
+                                                item: Proc::Output(
+                                                    Tag {
+                                                        item: Val::Path(
+                                                            vec!["t".to_string()].into(),
+                                                        ),
+                                                        tag: Pos {
+                                                            line: 1,
+                                                            column: 31,
+                                                        },
+                                                    },
+                                                    Tag {
+                                                        item: Val::Record(Record {
+                                                            props: vec![].into(),
+                                                        }),
+                                                        tag: Pos {
+                                                            line: 1,
+                                                            column: 33,
+                                                        },
+                                                    },
+                                                ),
+                                            }),
+                                        },
+                                        tag: Pos {
+                                            line: 1,
+                                            column: 23,
+                                        },
+                                    },
+                                ),
+                            }),
+                        },
                     },
                 },
+                tag: Pos { line: 1, column: 5 },
             },
-            Def {
-                name: "ff".to_string(),
-                abs: Tag {
-                    tag: Pos { line: 2, column: 7 },
-                    item: Abs {
-                        pattern: Tag {
-                            tag: Pos { line: 2, column: 7 },
-                            item: Pat::Record(Record {
-                                props: vec![Prop {
-                                    label: None,
-                                    val: Tag {
-                                        tag: Pos { line: 2, column: 8 },
-                                        item: Pat::Var(PatVar {
-                                            var: Var {
-                                                id: "b".to_string(),
-                                                r#type: Type::named("Boolean"),
-                                            },
-                                            pattern: None,
-                                        }),
-                                    },
-                                }]
-                                .into(),
-                            }),
-                        },
-                        proc: Box::new(Tag {
-                            tag: Pos {
-                                line: 2,
-                                column: 21,
-                            },
-                            item: Proc::Input(
-                                Tag {
-                                    item: Val::Path(vec!["b".to_string()].into()),
-                                    tag: Pos {
-                                        line: 2,
-                                        column: 21,
-                                    },
-                                },
-                                Tag {
-                                    item: Abs {
-                                        pattern: Tag {
-                                            tag: Pos {
-                                                line: 2,
-                                                column: 23,
-                                            },
-                                            item: Pat::Record(Record {
-                                                props: vec![
-                                                    Prop {
-                                                        label: None,
-                                                        val: Tag {
-                                                            tag: Pos {
-                                                                line: 2,
-                                                                column: 24,
-                                                            },
-                                                            item: Pat::Var(PatVar {
-                                                                var: Var {
-                                                                    id: "t".to_string(),
-                                                                    r#type: Type::Anonymous,
-                                                                },
-                                                                pattern: None,
-                                                            }),
-                                                        },
-                                                    },
-                                                    Prop {
-                                                        label: None,
-                                                        val: Tag {
-                                                            tag: Pos {
-                                                                line: 2,
-                                                                column: 26,
-                                                            },
-                                                            item: Pat::Var(PatVar {
-                                                                var: Var {
-                                                                    id: "f".to_string(),
-                                                                    r#type: Type::Anonymous,
-                                                                },
-                                                                pattern: None,
-                                                            }),
-                                                        },
-                                                    },
-                                                ]
-                                                .into(),
+            Tag {
+                item: Def {
+                    name: "ff".to_string(),
+                    abs: Tag {
+                        tag: Pos { line: 2, column: 7 },
+                        item: Abs {
+                            pattern: Tag {
+                                tag: Pos { line: 2, column: 7 },
+                                item: Pat::Record(Record {
+                                    props: vec![Prop {
+                                        label: None,
+                                        val: Tag {
+                                            tag: Pos { line: 2, column: 8 },
+                                            item: Pat::Var(PatVar {
+                                                var: Var {
+                                                    id: "b".to_string(),
+                                                    r#type: Type::named("Boolean"),
+                                                },
+                                                pattern: None,
                                             }),
                                         },
-                                        proc: Box::new(Tag {
-                                            tag: Pos {
-                                                line: 2,
-                                                column: 31,
-                                            },
-                                            item: Proc::Output(
-                                                Tag {
-                                                    item: Val::Path(vec!["f".to_string()].into()),
-                                                    tag: Pos {
-                                                        line: 2,
-                                                        column: 31,
-                                                    },
-                                                },
-                                                Tag {
-                                                    item: Val::Record(Record {
-                                                        props: vec![].into(),
-                                                    }),
-                                                    tag: Pos {
-                                                        line: 2,
-                                                        column: 33,
-                                                    },
-                                                },
-                                            ),
-                                        }),
-                                    },
-                                    tag: Pos {
-                                        line: 2,
-                                        column: 23,
-                                    },
+                                    }]
+                                    .into(),
+                                }),
+                            },
+                            proc: Box::new(Tag {
+                                tag: Pos {
+                                    line: 2,
+                                    column: 21,
                                 },
-                            ),
-                        }),
+                                item: Proc::Input(
+                                    Tag {
+                                        item: Val::Path(vec!["b".to_string()].into()),
+                                        tag: Pos {
+                                            line: 2,
+                                            column: 21,
+                                        },
+                                    },
+                                    Tag {
+                                        item: Abs {
+                                            pattern: Tag {
+                                                tag: Pos {
+                                                    line: 2,
+                                                    column: 23,
+                                                },
+                                                item: Pat::Record(Record {
+                                                    props: vec![
+                                                        Prop {
+                                                            label: None,
+                                                            val: Tag {
+                                                                tag: Pos {
+                                                                    line: 2,
+                                                                    column: 24,
+                                                                },
+                                                                item: Pat::Var(PatVar {
+                                                                    var: Var {
+                                                                        id: "t".to_string(),
+                                                                        r#type: Type::Anonymous,
+                                                                    },
+                                                                    pattern: None,
+                                                                }),
+                                                            },
+                                                        },
+                                                        Prop {
+                                                            label: None,
+                                                            val: Tag {
+                                                                tag: Pos {
+                                                                    line: 2,
+                                                                    column: 26,
+                                                                },
+                                                                item: Pat::Var(PatVar {
+                                                                    var: Var {
+                                                                        id: "f".to_string(),
+                                                                        r#type: Type::Anonymous,
+                                                                    },
+                                                                    pattern: None,
+                                                                }),
+                                                            },
+                                                        },
+                                                    ]
+                                                    .into(),
+                                                }),
+                                            },
+                                            proc: Box::new(Tag {
+                                                tag: Pos {
+                                                    line: 2,
+                                                    column: 31,
+                                                },
+                                                item: Proc::Output(
+                                                    Tag {
+                                                        item: Val::Path(
+                                                            vec!["f".to_string()].into(),
+                                                        ),
+                                                        tag: Pos {
+                                                            line: 2,
+                                                            column: 31,
+                                                        },
+                                                    },
+                                                    Tag {
+                                                        item: Val::Record(Record {
+                                                            props: vec![].into(),
+                                                        }),
+                                                        tag: Pos {
+                                                            line: 2,
+                                                            column: 33,
+                                                        },
+                                                    },
+                                                ),
+                                            }),
+                                        },
+                                        tag: Pos {
+                                            line: 2,
+                                            column: 23,
+                                        },
+                                    },
+                                ),
+                            }),
+                        },
                     },
                 },
+                tag: Pos { line: 2, column: 5 },
             },
         ]
         .into(),
