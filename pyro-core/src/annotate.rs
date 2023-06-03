@@ -20,10 +20,63 @@ pub struct Ann {
     pub used: HashMap<String, Type>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 struct Ctx {
-    variables: HashMap<String, Type>,
-    types: HashMap<String, Type>,
+    scope_id: u32,
+    variables_new: HashMap<u32, HashMap<String, Type>>,
+}
+
+impl Ctx {
+    pub fn new_scope(&mut self, parent: &Scoped) -> Scoped {
+        self.scope_id += 1;
+        let id = self.scope_id;
+        let mut ancestors = parent.ancestors.clone();
+
+        ancestors.push(id);
+
+        Scoped { ancestors }
+    }
+
+    pub fn look_up(&self, scope: &Scoped, name: &str) -> Option<Type> {
+        let mut ancestors = scope.ancestors.clone();
+        while let Some(scope_id) = ancestors.pop() {
+            if let Some(variables) = self.variables_new.get(&scope_id) {
+                if let Some(r#type) = variables.get(name) {
+                    return Some(r#type.clone());
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn declare(&mut self, scope: &Scoped, name: impl AsRef<str>, r#type: Type) -> bool {
+        let scope_id = scope.ancestors.last().copied().unwrap();
+        let variables = self.variables_new.entry(scope_id).or_default();
+
+        if variables.contains_key(name.as_ref()) {
+            return false;
+        }
+
+        variables.insert(name.as_ref().to_string(), r#type);
+
+        true
+    }
+
+    pub fn _update(&mut self, scope: &Scoped, name: impl AsRef<str>, r#type: Type) {
+        let mut ancestors = scope.ancestors.clone();
+        while let Some(scope_id) = ancestors.pop() {
+            if let Some(variables) = self.variables_new.get_mut(&scope_id) {
+                variables.insert(name.as_ref().to_string(), r#type);
+                return;
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+struct Scoped {
+    ancestors: Vec<u32>,
 }
 
 impl Ann {
@@ -40,57 +93,58 @@ impl Ann {
     }
 }
 
-fn configure_context() -> Ctx {
-    let mut ctx = Ctx::default();
-
-    ctx.variables
-        .insert("print".to_string(), Type::client(Type::string()));
-
-    ctx.variables.insert(
-        "+".to_string(),
+fn configure_context(ctx: &mut Ctx, pi_std: &Scoped) {
+    ctx.declare(&pi_std, "print", Type::client(Type::string()));
+    ctx.declare(
+        pi_std,
+        "+",
         Type::func(
             Type::integer(),
             Type::func(Type::integer(), Type::integer()),
         ),
     );
-
-    ctx.variables.insert(
-        "<=".to_string(),
+    ctx.declare(
+        pi_std,
+        "<=",
         Type::func(Type::integer(), Type::func(Type::integer(), Type::bool())),
     );
 
-    ctx.types.insert("String".to_string(), Type::string());
-    ctx.types.insert("Bool".to_string(), Type::bool());
-    ctx.types.insert("Integer".to_string(), Type::integer());
-    ctx.types.insert("Char".to_string(), Type::char());
-    ctx.types.insert("Client".to_string(), Type::client_type());
-    ctx.types.insert("Server".to_string(), Type::server_type());
-    ctx.types
-        .insert("Channel".to_string(), Type::channel_type());
-
-    ctx
+    ctx.declare(pi_std, "String", Type::string());
+    ctx.declare(pi_std, "Bool", Type::bool());
+    ctx.declare(pi_std, "Integer", Type::integer());
+    ctx.declare(pi_std, "Char", Type::char());
+    ctx.declare(pi_std, "Client", Type::client_type());
+    ctx.declare(pi_std, "Server", Type::server_type());
+    ctx.declare(pi_std, "Channel", Type::channel_type());
 }
 
 pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
     let mut annotated = Vec::new();
-    let ctx = configure_context();
+    let mut ctx = Ctx::default();
+    let pi_std = Scoped {
+        ancestors: vec![ctx.scope_id],
+    };
+
+    configure_context(&mut ctx, &pi_std);
 
     for proc in prog.procs {
-        annotated.push(annotate_proc(ctx.clone(), proc)?);
+        let new_scope = ctx.new_scope(&pi_std);
+        annotated.push(annotate_proc(&mut ctx, new_scope, proc)?);
     }
 
     Ok(Program { procs: annotated })
 }
 
-fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann>, Ann>> {
+fn annotate_proc(
+    ctx: &mut Ctx,
+    scope: Scoped,
+    proc: Tag<Proc<Pos>, Pos>,
+) -> Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let mut l = annotate_val(&mut ctx, ValCtx::Output, l)?;
-            let mut r = annotate_val(&mut ctx, ValCtx::Regular, r)?;
-
-            ann.used.extend(l.tag.used.clone());
-            ann.used.extend(r.tag.used.clone());
+            let mut l = annotate_val(ctx, &scope, ValCtx::Output, l)?;
+            let mut r = annotate_val(ctx, &scope, ValCtx::Regular, r)?;
 
             if !l.tag.r#type.typecheck_client_call(&r.tag.r#type) {
                 return Err(Error {
@@ -106,8 +160,12 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
             if l.tag.r#type == Type::Anonymous {
                 l.tag.r#type = Type::client(r.tag.r#type.clone());
             } else if r.tag.r#type == Type::Anonymous {
-                r.tag.r#type = l.tag.r#type.inner_type();
+                let inferred_type = l.tag.r#type.inner_type();
+                r.tag.r#type = inferred_type.clone();
             }
+
+            ann.used.extend(l.tag.used.clone());
+            ann.used.extend(r.tag.used.clone());
 
             Ok(Tag {
                 tag: ann,
@@ -117,8 +175,8 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
 
         Proc::Input(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let l = annotate_val(&mut ctx, ValCtx::Input, l)?;
-            let (pat_type, r) = annotate_abs(&mut ctx, r, None)?;
+            let l = annotate_val(ctx, &scope, ValCtx::Input, l)?;
+            let (pat_type, r) = annotate_abs(ctx, &scope, r, None)?;
 
             ann.used.extend(l.tag.used.clone());
             ann.used.extend(r.tag.used.clone());
@@ -149,7 +207,8 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
             let mut new_ps = Vec::new();
 
             for p in ps {
-                let proc = annotate_proc(ctx.clone(), p)?;
+                let new_scope = ctx.new_scope(&scope);
+                let proc = annotate_proc(ctx, new_scope, p)?;
 
                 ann.used.extend(proc.tag.used.clone());
                 new_ps.push(proc);
@@ -162,8 +221,9 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
         }
 
         Proc::Decl(d, p) => {
-            let d = annotate_decl(&mut ctx, d)?;
-            let p = annotate_proc(ctx.clone(), *p)?;
+            let d = annotate_decl(ctx, &scope, d)?;
+            let new_scope = ctx.new_scope(&scope);
+            let p = annotate_proc(ctx, new_scope, *p)?;
             let mut tag = p.tag.clone();
             tag.r#type = Type::process();
 
@@ -174,7 +234,7 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
         }
 
         Proc::Cond(val, if_proc, else_proc) => {
-            let val = annotate_val(&mut ctx, ValCtx::Regular, val)?;
+            let val = annotate_val(ctx, &scope, ValCtx::Regular, val)?;
 
             if !Type::bool().parent_type_of(&val.tag.r#type) {
                 return Err(Error {
@@ -184,8 +244,10 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
             }
 
             let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let if_proc = annotate_proc(ctx.clone(), *if_proc)?;
-            let else_proc = annotate_proc(ctx.clone(), *else_proc)?;
+            let new_scope = ctx.new_scope(&scope);
+            let if_proc = annotate_proc(ctx, new_scope, *if_proc)?;
+            let new_scope = ctx.new_scope(&scope);
+            let else_proc = annotate_proc(ctx, new_scope, *else_proc)?;
 
             ann.used.extend(val.tag.used.clone());
             ann.used.extend(if_proc.tag.used.clone());
@@ -201,17 +263,23 @@ fn annotate_proc(mut ctx: Ctx, proc: Tag<Proc<Pos>, Pos>) -> Result<Tag<Proc<Ann
 
 fn annotate_abs(
     ctx: &mut Ctx,
+    scope: &Scoped,
     tag: Tag<Abs<Pos>, Pos>,
     named: Option<String>,
 ) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
-    let pattern = annotate_pattern(ctx, tag.item.pattern)?;
+    let pattern = annotate_pattern(ctx, &scope, tag.item.pattern)?;
 
     if let Some(def_name) = named {
-        ctx.variables
-            .insert(def_name, Type::client(pattern.tag.r#type.clone()));
+        if !ctx.declare(&scope, &def_name, Type::client(pattern.tag.r#type.clone())) {
+            return Err(Error {
+                pos: tag.tag,
+                message: format!("Definition '{}' already exists", def_name),
+            });
+        }
     }
 
-    let proc = annotate_proc(ctx.clone(), *tag.item.proc)?;
+    let new_scope = ctx.new_scope(&scope);
+    let proc = annotate_proc(ctx, new_scope, *tag.item.proc)?;
     let mut ann = proc.tag.clone();
 
     ann.pos = tag.tag;
@@ -229,15 +297,25 @@ fn annotate_abs(
     ))
 }
 
-fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<Ann>, Ann>> {
+fn annotate_decl(
+    ctx: &mut Ctx,
+    scope: &Scoped,
+    decl: Tag<Decl<Pos>, Pos>,
+) -> Result<Tag<Decl<Ann>, Ann>> {
     let ann = Ann::new(decl.tag);
     let item = match decl.item {
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
 
             for (n, t) in cs {
-                let t = resolve_type(&ctx, decl.tag, t)?;
-                ctx.variables.insert(n.clone(), t.clone());
+                let t = resolve_type(&ctx, &scope, decl.tag, t)?;
+
+                if !ctx.declare(&scope, &n, t.clone()) {
+                    return Err(Error {
+                        pos: decl.tag,
+                        message: format!("Channel '{}' already exists", n),
+                    });
+                }
 
                 chans.push((n, t));
             }
@@ -246,17 +324,15 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
         }
 
         Decl::Type(n, t) => {
-            let resolved_type = resolve_type(&ctx, decl.tag, t)?;
-            ctx.types.insert(n.clone(), resolved_type.clone());
+            let resolved_type = resolve_type(&ctx, &scope, decl.tag, t)?;
+            ctx.declare(&scope, &n, resolved_type.clone());
             Decl::Type(n, resolved_type)
         }
 
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
             for def in defs {
-                let (r#type, abs) = annotate_abs(ctx, def.abs, Some(def.name.clone()))?;
-
-                ctx.variables.insert(def.name.clone(), Type::client(r#type));
+                let (_, abs) = annotate_abs(ctx, scope, def.abs, Some(def.name.clone()))?;
 
                 new_defs.push(Def {
                     name: def.name,
@@ -271,10 +347,10 @@ fn annotate_decl(ctx: &mut Ctx, decl: Tag<Decl<Pos>, Pos>) -> Result<Tag<Decl<An
     Ok(Tag { item, tag: ann })
 }
 
-fn resolve_type(ctx: &Ctx, pos: Pos, r#type: Type) -> Result<Type> {
+fn resolve_type(ctx: &Ctx, scope: &Scoped, pos: Pos, r#type: Type) -> Result<Type> {
     match r#type.name() {
         Some(n) => {
-            if let Some(rn) = ctx.types.get(n) {
+            if let Some(rn) = ctx.look_up(scope, n) {
                 Ok(rn.clone())
             } else {
                 Err(Error {
@@ -286,7 +362,7 @@ fn resolve_type(ctx: &Ctx, pos: Pos, r#type: Type) -> Result<Type> {
 
         _ => {
             if let Type::Record(rec) = r#type {
-                let rec = rec.traverse_result(|t| resolve_type(ctx, pos, t))?;
+                let rec = rec.traverse_result(|t| resolve_type(ctx, scope, pos, t))?;
 
                 Ok(Type::Record(rec))
             } else {
@@ -305,10 +381,14 @@ fn literal_type(lit: &Literal) -> Type {
     }
 }
 
-fn annotate_pattern(ctx: &mut Ctx, tag: Tag<Pat<Pos>, Pos>) -> Result<Tag<Pat<Ann>, Ann>> {
+fn annotate_pattern(
+    ctx: &mut Ctx,
+    scope: &Scoped,
+    tag: Tag<Pat<Pos>, Pos>,
+) -> Result<Tag<Pat<Ann>, Ann>> {
     match tag.item {
         Pat::Var(v) => {
-            let pat_tag = annotate_pat_var(ctx, tag.tag, v)?;
+            let pat_tag = annotate_pat_var(ctx, scope, tag.tag, v)?;
 
             Ok(Tag {
                 item: Pat::Var(pat_tag.item),
@@ -321,7 +401,7 @@ fn annotate_pattern(ctx: &mut Ctx, tag: Tag<Pat<Pos>, Pos>) -> Result<Tag<Pat<An
             let mut props_type = Vec::new();
 
             for prop in rec.props {
-                let val = annotate_pattern(ctx, prop.val)?;
+                let val = annotate_pattern(ctx, scope, prop.val)?;
 
                 props_type.push(Prop {
                     label: prop.label.clone(),
@@ -342,7 +422,7 @@ fn annotate_pattern(ctx: &mut Ctx, tag: Tag<Pat<Pos>, Pos>) -> Result<Tag<Pat<An
         }
 
         Pat::Wildcard(t) => {
-            let t = resolve_type(&ctx, tag.tag, t)?;
+            let t = resolve_type(&ctx, scope, tag.tag, t)?;
 
             Ok(Tag {
                 item: Pat::Wildcard(t.clone()),
@@ -353,6 +433,7 @@ fn annotate_pattern(ctx: &mut Ctx, tag: Tag<Pat<Pos>, Pos>) -> Result<Tag<Pat<An
 }
 fn annotate_pat_var(
     ctx: &mut Ctx,
+    scope: &Scoped,
     pos: Pos,
     mut pat_var: PatVar<Pos>,
 ) -> Result<Tag<PatVar<Ann>, Ann>> {
@@ -362,8 +443,8 @@ fn annotate_pat_var(
             tag: pos,
         };
 
-        pat_var.var.r#type = resolve_type(&ctx, pos, pat_var.var.r#type)?;
-        let pat = annotate_pattern(ctx, param)?;
+        pat_var.var.r#type = resolve_type(&ctx, scope, pos, pat_var.var.r#type)?;
+        let pat = annotate_pattern(ctx, scope, param)?;
 
         if pat_var.var.r#type != Type::Anonymous
             && !pat_var.var.r#type.parent_type_of(&pat.tag.r#type)
@@ -379,10 +460,18 @@ fn annotate_pat_var(
 
         (pat.tag.r#type, Some(Box::new(pat.item)))
     } else {
-        (resolve_type(&ctx, pos, pat_var.var.r#type.clone())?, None)
+        (
+            resolve_type(&ctx, scope, pos, pat_var.var.r#type.clone())?,
+            None,
+        )
     };
 
-    ctx.variables.insert(pat_var.var.id.clone(), r#type.clone());
+    if !ctx.declare(scope, &pat_var.var.id, r#type.clone()) {
+        return Err(Error {
+            pos,
+            message: format!("Variable '{}' already exists", pat_var.var.id),
+        });
+    }
 
     Ok(Tag {
         item: PatVar {
@@ -395,6 +484,7 @@ fn annotate_pat_var(
 
 fn annotate_val(
     ctx: &mut Ctx,
+    scope: &Scoped,
     val_ctx: ValCtx,
     lit: Tag<Val<Pos>, Pos>,
 ) -> Result<Tag<Val<Ann>, Ann>> {
@@ -411,7 +501,7 @@ fn annotate_val(
         Val::Path(p) => match val_ctx {
             ValCtx::Input | ValCtx::Output => {
                 let name = p.first().unwrap();
-                let r#type = if let Some(r#type) = ctx.variables.get(name) {
+                let r#type = if let Some(r#type) = ctx.look_up(scope, name) {
                     r#type
                 } else {
                     return Err(Error {
@@ -434,7 +524,7 @@ fn annotate_val(
                 let mut path = p.clone();
                 path.reverse();
                 let name = path.pop().unwrap();
-                let r#type = if let Some(r#type) = ctx.variables.get(&name) {
+                let r#type = if let Some(r#type) = ctx.look_up(scope, &name) {
                     r#type
                 } else {
                     return Err(Error {
@@ -487,7 +577,7 @@ fn annotate_val(
             let mut used = HashMap::new();
 
             for prop in xs.props {
-                let val = annotate_val(ctx, ValCtx::Regular, prop.val)?;
+                let val = annotate_val(ctx, &scope, ValCtx::Regular, prop.val)?;
 
                 used.extend(val.tag.used.clone());
 
@@ -511,7 +601,7 @@ fn annotate_val(
         }
 
         Val::AnoClient(abs) => {
-            let (r#type, abs) = annotate_abs(ctx, abs, None)?;
+            let (r#type, abs) = annotate_abs(ctx, scope, abs, None)?;
             let mut ann = abs.tag.clone();
 
             ann.r#type = Type::client(r#type);
@@ -523,8 +613,8 @@ fn annotate_val(
         }
 
         Val::App(caller, param) => {
-            let caller = annotate_val(ctx, val_ctx, *caller)?;
-            let param = annotate_val(ctx, val_ctx, *param)?;
+            let caller = annotate_val(ctx, &scope, val_ctx, *caller)?;
+            let param = annotate_val(ctx, &scope, val_ctx, *param)?;
 
             if !caller.tag.r#type.inherits("Fn") {
                 return Err(Error {
