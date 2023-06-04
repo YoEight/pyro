@@ -406,7 +406,7 @@ impl Scope {
 
             Decl::Def(defs) => {
                 for def in defs {
-                    self.register_def(def);
+                    self.register_def(def.item);
                 }
             }
 
