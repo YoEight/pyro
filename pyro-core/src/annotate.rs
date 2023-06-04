@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Type};
@@ -18,6 +21,22 @@ pub struct Ann {
     pub pos: Pos,
     pub r#type: Type,
     pub used: HashMap<String, Type>,
+}
+
+fn generate_generic_type_name(mut n: usize) -> String {
+    let mut result = String::new();
+    loop {
+        let ch = ((n % 26) as u8 + b'a') as char;
+        result.push(ch);
+        n /= 26;
+        if n > 0 {
+            n -= 1;
+        } else {
+            break;
+        }
+    }
+
+    result.chars().rev().collect::<String>()
 }
 
 #[derive(Default)]
@@ -79,6 +98,12 @@ struct Scoped {
     ancestors: Vec<u32>,
 }
 
+impl Scoped {
+    pub fn std() -> Self {
+        Self { ancestors: vec![0] }
+    }
+}
+
 impl Ann {
     pub fn with_type(r#type: Type, pos: Pos) -> Self {
         Self {
@@ -121,9 +146,7 @@ fn configure_context(ctx: &mut Ctx, pi_std: &Scoped) {
 pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
     let mut annotated = Vec::new();
     let mut ctx = Ctx::default();
-    let pi_std = Scoped {
-        ancestors: vec![ctx.scope_id],
-    };
+    let pi_std = Scoped::std();
 
     configure_context(&mut ctx, &pi_std);
 
@@ -703,7 +726,7 @@ fn annotate_val(
             let caller = annotate_val(ctx, &scope, val_ctx, *caller)?;
             let param = annotate_val(ctx, &scope, val_ctx, *param)?;
 
-            if !caller.tag.r#type.inherits("Fn") {
+            if !caller.tag.r#type.ancestor_tree_contains(&Type::func_type()) {
                 return Err(Error {
                     pos: caller.tag.pos,
                     message: format!(

@@ -98,6 +98,7 @@ pub enum Type {
         parent: Vec<Type>,
         name: String,
         kind: u16,
+        generic: bool,
     },
     App(Box<Type>, Box<Type>),
     Anonymous,
@@ -113,58 +114,59 @@ impl Type {
         self.clone()
     }
 
-    pub fn parent_type_of(&self, child: &Type) -> bool {
-        if self == &Type::Anonymous || child == &Type::Anonymous {
+    pub fn ancestor_tree_contains(&self, r#type: &Type) -> bool {
+        if r#type == &Type::Anonymous {
             return true;
         }
 
-        if let Type::Name { name, .. } = self {
-            return child.inherits(name);
-        }
+        if self != r#type {
+            match self {
+                Type::Name { parent, .. } => parent
+                    .iter()
+                    .any(|ancestor| ancestor.ancestor_tree_contains(r#type)),
 
-        if let Type::App(cons, _) = self {
-            return cons.parent_type_of(child);
-        }
-
-        match (self, child) {
-            (Type::Record(ra), Type::Record(rb)) if ra.props.len() == rb.props.len() => {
-                for (a, b) in ra.props.iter().zip(rb.props.iter()) {
-                    if a.label != b.label || !a.val.parent_type_of(&b.val) {
-                        return false;
+                Type::App(self_cons, self_inner) => {
+                    if let Type::App(type_cons, type_inner) = r#type {
+                        self_cons.ancestor_tree_contains(type_cons)
+                            && self_inner.ancestor_tree_contains(type_inner)
+                    } else {
+                        self_cons.ancestor_tree_contains(r#type)
                     }
                 }
+                Type::Anonymous => true,
+                Type::Record(self_rec) => {
+                    if let Type::Record(rec_type) = r#type {
+                        if self_rec.props.len() != rec_type.props.len() {
+                            return false;
+                        }
 
-                true
+                        for (rec_prop, type_prop) in
+                            self_rec.props.iter().zip(rec_type.props.iter())
+                        {
+                            if !rec_prop.val.ancestor_tree_contains(&type_prop.val) {
+                                return false;
+                            }
+                        }
+
+                        true
+                    } else {
+                        false
+                    }
+                }
             }
-
-            (Type::App(ca, ta), Type::App(cb, tb)) => {
-                ca.parent_type_of(cb) && ta.parent_type_of(tb)
-            }
-
-            _ => self == child,
+        } else {
+            true
         }
     }
 
-    pub fn inherits(&self, parent_name: &str) -> bool {
-        match self {
-            Type::Name { name, parent, .. } => {
-                if name == parent_name {
-                    return true;
-                }
-
-                parent.iter().any(|p| p.inherits(parent_name))
-            }
-
-            Type::App(outer, _) => outer.inherits(parent_name),
-            Type::Anonymous => true,
-            Type::Record(_) => false,
-        }
+    pub fn parent_type_of(&self, child: &Type) -> bool {
+        child.ancestor_tree_contains(self)
     }
 
     pub fn apply(&self, param: &Type) -> Option<Type> {
         match self {
             Type::App(caller, tail) => {
-                if !caller.inherits("Fn") {
+                if !caller.ancestor_tree_contains(&Type::func_type()) {
                     return None;
                 }
 
@@ -212,6 +214,7 @@ impl Type {
             parent: vec![Type::client_type(), Type::server_type()],
             name: "Channel".to_string(),
             kind: 1,
+            generic: false,
         }
     }
 
@@ -224,6 +227,7 @@ impl Type {
             parent: vec![],
             name: "Client".to_string(),
             kind: 1,
+            generic: false,
         }
     }
 
@@ -236,6 +240,7 @@ impl Type {
             parent: vec![],
             name: "Server".to_string(),
             kind: 1,
+            generic: false,
         }
     }
 
@@ -244,6 +249,7 @@ impl Type {
             parent: vec![Type::show()],
             name: "Integer".to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
@@ -252,6 +258,7 @@ impl Type {
             parent: vec![Type::show()],
             name: "String".to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
@@ -260,6 +267,7 @@ impl Type {
             parent: vec![Type::show()],
             name: "Char".to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
@@ -268,6 +276,7 @@ impl Type {
             parent: vec![Type::show()],
             name: "Bool".to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
@@ -276,6 +285,7 @@ impl Type {
             parent: vec![],
             name: "Process".to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
@@ -284,18 +294,24 @@ impl Type {
             parent: vec![],
             name: "Show".to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
     pub fn func(param: Type, result: Type) -> Self {
         Type::App(
-            Box::new(Type::Name {
-                parent: vec![],
-                name: "Fn".to_string(),
-                kind: 2,
-            }),
+            Box::new(Type::func_type()),
             Box::new(Type::App(Box::new(param), Box::new(result))),
         )
+    }
+
+    pub fn func_type() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Fn".to_string(),
+            kind: 2,
+            generic: false,
+        }
     }
 
     pub fn named(name: impl AsRef<str>) -> Self {
@@ -303,35 +319,24 @@ impl Type {
             parent: vec![],
             name: name.as_ref().to_string(),
             kind: 0,
+            generic: false,
         }
     }
 
     pub fn typecheck_client_call(&self, params: &Type) -> bool {
-        if !self.inherits("Client") {
+        if !self.ancestor_tree_contains(&Type::client_type()) {
             return false;
         }
 
-        let expected_msg_type = if let Type::App(_, msg_type) = self {
-            msg_type.as_ref()
-        } else {
-            self
-        };
-
-        expected_msg_type.parent_type_of(params)
+        self.inner_type().parent_type_of(params)
     }
 
     pub fn typecheck_server_call(&self, params: &Type) -> bool {
-        if !self.inherits("Server") {
+        if !self.ancestor_tree_contains(&Type::server_type()) {
             return false;
         }
 
-        let expected_msg_type = if let Type::App(_, msg_type) = self {
-            msg_type
-        } else {
-            unreachable!()
-        };
-
-        expected_msg_type.parent_type_of(params)
+        self.inner_type().parent_type_of(params)
     }
 }
 
