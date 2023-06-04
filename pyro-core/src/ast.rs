@@ -105,14 +105,6 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            Type::Name { name, .. } => Some(&name),
-            Type::App(_, inner) => inner.name(),
-            _ => None,
-        }
-    }
-
     pub fn inner_type(&self) -> Self {
         if let Type::App(_, r) = self {
             return r.as_ref().clone();
@@ -126,8 +118,12 @@ impl Type {
             return true;
         }
 
-        if let Some(name) = self.name() {
+        if let Type::Name { name, .. } = self {
             return child.inherits(name);
+        }
+
+        if let Type::App(cons, _) = self {
+            return cons.parent_type_of(child);
         }
 
         match (self, child) {
@@ -245,7 +241,7 @@ impl Type {
 
     pub fn integer() -> Self {
         Type::Name {
-            parent: vec![],
+            parent: vec![Type::show()],
             name: "Integer".to_string(),
             kind: 0,
         }
@@ -253,7 +249,7 @@ impl Type {
 
     pub fn string() -> Self {
         Type::Name {
-            parent: vec![],
+            parent: vec![Type::show()],
             name: "String".to_string(),
             kind: 0,
         }
@@ -261,7 +257,7 @@ impl Type {
 
     pub fn char() -> Self {
         Type::Name {
-            parent: vec![],
+            parent: vec![Type::show()],
             name: "Char".to_string(),
             kind: 0,
         }
@@ -269,7 +265,7 @@ impl Type {
 
     pub fn bool() -> Self {
         Type::Name {
-            parent: vec![],
+            parent: vec![Type::show()],
             name: "Bool".to_string(),
             kind: 0,
         }
@@ -279,6 +275,14 @@ impl Type {
         Type::Name {
             parent: vec![],
             name: "Process".to_string(),
+            kind: 0,
+        }
+    }
+
+    pub fn show() -> Self {
+        Type::Name {
+            parent: vec![],
+            name: "Show".to_string(),
             kind: 0,
         }
     }

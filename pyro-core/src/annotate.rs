@@ -94,7 +94,7 @@ impl Ann {
 }
 
 fn configure_context(ctx: &mut Ctx, pi_std: &Scoped) {
-    ctx.declare(&pi_std, "print", Type::client(Type::string()));
+    ctx.declare(&pi_std, "print", Type::client(Type::show()));
     ctx.declare(
         pi_std,
         "+",
@@ -432,27 +432,32 @@ fn annotate_decl(
 }
 
 fn resolve_type(ctx: &Ctx, scope: &Scoped, pos: Pos, r#type: Type) -> Result<Type> {
-    match r#type.name() {
-        Some(n) => {
-            if let Some(rn) = ctx.look_up(scope, n) {
+    match r#type {
+        Type::Name { name, .. } => {
+            if let Some(rn) = ctx.look_up(scope, &name) {
                 Ok(rn.clone())
             } else {
                 Err(Error {
                     pos,
-                    message: format!("Unknown type '{}'", n),
+                    message: format!("Unknown type '{}'", name),
                 })
             }
         }
 
-        _ => {
-            if let Type::Record(rec) = r#type {
-                let rec = rec.traverse_result(|t| resolve_type(ctx, scope, pos, t))?;
+        Type::Record(rec) => {
+            let rec = rec.traverse_result(|t| resolve_type(ctx, scope, pos, t))?;
 
-                Ok(Type::Record(rec))
-            } else {
-                Ok(r#type)
-            }
+            Ok(Type::Record(rec))
         }
+
+        Type::App(cons, end) => {
+            let cons = resolve_type(ctx, scope, pos, *cons)?;
+            let end = resolve_type(ctx, scope, pos, *end)?;
+
+            Ok(Type::App(Box::new(cons), Box::new(end)))
+        }
+
+        _ => Ok(r#type),
     }
 }
 
@@ -544,10 +549,8 @@ fn annotate_pat_var(
 
         (pat.tag.r#type, Some(Box::new(pat.item)))
     } else {
-        (
-            resolve_type(&ctx, scope, pos, pat_var.var.r#type.clone())?,
-            None,
-        )
+        pat_var.var.r#type = resolve_type(&ctx, scope, pos, pat_var.var.r#type.clone())?;
+        (pat_var.var.r#type.clone(), None)
     };
 
     if !ctx.declare(scope, &pat_var.var.id, r#type.clone()) {
