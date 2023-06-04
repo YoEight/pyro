@@ -419,6 +419,15 @@ impl<A> Record<A> {
         acc
     }
 
+    pub fn for_each<F>(&mut self, mut fun: F)
+    where
+        F: FnMut(&mut A),
+    {
+        for prop in self.props.iter_mut() {
+            fun(&mut prop.val)
+        }
+    }
+
     pub fn find_by_prop(&self, name: &str) -> Option<Prop<A>>
     where
         A: Clone,

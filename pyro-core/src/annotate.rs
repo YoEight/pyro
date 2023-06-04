@@ -63,7 +63,7 @@ impl Ctx {
         true
     }
 
-    pub fn _update(&mut self, scope: &Scoped, name: impl AsRef<str>, r#type: Type) {
+    pub fn update(&mut self, scope: &Scoped, name: impl AsRef<str>, r#type: Type) {
         let mut ancestors = scope.ancestors.clone();
         while let Some(scope_id) = ancestors.pop() {
             if let Some(variables) = self.variables_new.get_mut(&scope_id) {
@@ -158,10 +158,13 @@ fn annotate_proc(
             }
 
             if l.tag.r#type == Type::Anonymous {
-                l.tag.r#type = Type::client(r.tag.r#type.clone());
+                let inferred_type = Type::client(r.tag.r#type.clone());
+                l.tag.r#type = inferred_type.clone();
+                update_val_type_info(ctx, &scope, &mut l, inferred_type.clone());
             } else if r.tag.r#type == Type::Anonymous {
                 let inferred_type = l.tag.r#type.inner_type();
                 r.tag.r#type = inferred_type.clone();
+                update_val_type_info(ctx, &scope, &mut r, inferred_type.clone());
             }
 
             ann.used.extend(l.tag.used.clone());
@@ -175,8 +178,8 @@ fn annotate_proc(
 
         Proc::Input(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let l = annotate_val(ctx, &scope, ValCtx::Input, l)?;
-            let (pat_type, r) = annotate_abs(ctx, &scope, r, None)?;
+            let mut l = annotate_val(ctx, &scope, ValCtx::Input, l)?;
+            let (pat_type, mut r) = annotate_abs(ctx, &scope, r, None)?;
 
             ann.used.extend(l.tag.used.clone());
             ann.used.extend(r.tag.used.clone());
@@ -189,6 +192,14 @@ fn annotate_proc(
                         l.tag.r#type, pat_type
                     ),
                 });
+            }
+
+            if l.tag.r#type == Type::Anonymous {
+                let inferred_type = Type::server(r.tag.r#type.clone());
+                update_val_type_info(ctx, &scope, &mut l, inferred_type.clone());
+            } else if r.tag.r#type == Type::Anonymous {
+                let inferred_type = l.tag.r#type.inner_type();
+                r.tag.r#type = inferred_type;
             }
 
             Ok(Tag {
@@ -261,13 +272,38 @@ fn annotate_proc(
     }
 }
 
+fn update_val_type_info(
+    ctx: &mut Ctx,
+    scope: &Scoped,
+    node: &mut Tag<Val<Ann>, Ann>,
+    inferred_type: Type,
+) {
+    if let Val::Path(p) = &node.item {
+        update_path_type_info(ctx, scope, p, inferred_type.clone());
+    } else {
+        panic!("not implemented for {}", node.item);
+    }
+
+    node.tag.r#type = inferred_type;
+}
+
+fn update_path_type_info(ctx: &mut Ctx, scope: &Scoped, path: &Vec<String>, inferred_type: Type) {
+    // TODO - I'm pretty sure this code won't work with record projection, for example x.y.
+    match path.as_slice() {
+        [ident] => {
+            ctx.update(scope, ident, inferred_type);
+        }
+        _ => todo!(),
+    }
+}
+
 fn annotate_abs(
     ctx: &mut Ctx,
     scope: &Scoped,
     tag: Tag<Abs<Pos>, Pos>,
     named: Option<String>,
 ) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
-    let pattern = annotate_pattern(ctx, &scope, tag.item.pattern)?;
+    let mut pattern = annotate_pattern(ctx, &scope, tag.item.pattern)?;
 
     if let Some(def_name) = named {
         if !ctx.declare(&scope, &def_name, Type::client(pattern.tag.r#type.clone())) {
@@ -282,6 +318,8 @@ fn annotate_abs(
     let proc = annotate_proc(ctx, new_scope, *tag.item.proc)?;
     let mut ann = proc.tag.clone();
 
+    update_pattern_type_info(ctx, scope, &mut pattern);
+
     ann.pos = tag.tag;
     ann.used.extend(pattern.tag.used.clone());
 
@@ -295,6 +333,40 @@ fn annotate_abs(
             tag: ann,
         },
     ))
+}
+
+fn update_pattern_type_info(ctx: &mut Ctx, scope: &Scoped, node: &mut Tag<Pat<Ann>, Ann>) {
+    match &mut node.item {
+        Pat::Var(var) => {
+            update_pat_var_type_info(ctx, scope, var);
+            // FIXME - The way we propagate type information is horrendous, we need to find a beter
+            // way to prevent so weird mutable updates.
+            node.tag.r#type = var.var.r#type.clone();
+        }
+
+        Pat::Record(rec) => {
+            // FIXME - Jeez that function is ugly as hell!!!
+            node.tag.r#type = update_pat_rec_type_info(ctx, scope, rec);
+        }
+
+        Pat::Wildcard(_) => {}
+    }
+}
+
+fn update_pat_rec_type_info(
+    ctx: &mut Ctx,
+    scope: &Scoped,
+    rec: &mut Record<Tag<Pat<Ann>, Ann>>,
+) -> Type {
+    rec.for_each(|node| update_pattern_type_info(ctx, scope, node));
+    let r#type = rec.clone().map(|node| node.tag.r#type);
+
+    Type::Record(r#type)
+}
+
+fn update_pat_var_type_info(ctx: &mut Ctx, scope: &Scoped, pat_var: &mut PatVar<Ann>) {
+    let r#type = ctx.look_up(scope, &pat_var.var.id).unwrap();
+    pat_var.var.r#type = r#type.clone();
 }
 
 fn annotate_decl(
