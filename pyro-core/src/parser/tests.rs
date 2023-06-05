@@ -55,7 +55,7 @@ fn test_parse_abs_with_input() {
                             item: Pat::Var(PatVar {
                                 var: Var {
                                     id: "b".to_string(),
-                                    r#type: Type::Anonymous,
+                                    r#type: Type::generic("a".to_string()),
                                 },
                                 pattern: None,
                             }),
@@ -120,7 +120,7 @@ fn test_parse_parallel() {
                                         item: Pat::Var(PatVar {
                                             var: Var {
                                                 id: "b".to_string(),
-                                                r#type: Type::Anonymous,
+                                                r#type: Type::generic("a".to_string()),
                                             },
                                             pattern: None,
                                         }),
@@ -175,7 +175,7 @@ fn test_parse_parallel() {
                                         item: Pat::Var(PatVar {
                                             var: Var {
                                                 id: "d".to_string(),
-                                                r#type: Type::Anonymous,
+                                                r#type: Type::generic("b".to_string()),
                                             },
                                             pattern: None,
                                         }),
@@ -415,7 +415,9 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "t".to_string(),
-                                                                        r#type: Type::Anonymous,
+                                                                        r#type: Type::generic(
+                                                                            "a".to_string(),
+                                                                        ),
                                                                     },
                                                                     pattern: None,
                                                                 }),
@@ -431,7 +433,9 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "f".to_string(),
-                                                                        r#type: Type::Anonymous,
+                                                                        r#type: Type::generic(
+                                                                            "b".to_string(),
+                                                                        ),
                                                                     },
                                                                     pattern: None,
                                                                 }),
@@ -537,7 +541,9 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "t".to_string(),
-                                                                        r#type: Type::Anonymous,
+                                                                        r#type: Type::generic(
+                                                                            "c".to_string(),
+                                                                        ),
                                                                     },
                                                                     pattern: None,
                                                                 }),
@@ -553,7 +559,9 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "f".to_string(),
-                                                                        r#type: Type::Anonymous,
+                                                                        r#type: Type::generic(
+                                                                            "d".to_string(),
+                                                                        ),
                                                                     },
                                                                     pattern: None,
                                                                 }),

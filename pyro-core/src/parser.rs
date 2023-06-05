@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::ast::{
+    generate_generic_type_name, Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag,
+    Type, Val, Var,
+};
 use crate::sym::{Keyword, Punctuation, Sym};
 use crate::tokenizer::Token;
 use crate::{Error, Pos, Result};
@@ -46,13 +49,22 @@ impl RecordKind for RecordPat {
 #[derive(Clone)]
 pub struct ParserState<'a> {
     peekable: Peekable<Iter<'a, Token>>,
+    gen_type_id: usize,
 }
 
 impl<'a> ParserState<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
         Self {
             peekable: tokens.iter().peekable(),
+            gen_type_id: 0,
         }
+    }
+
+    pub fn next_type_id(&mut self) -> usize {
+        let value = self.gen_type_id;
+        self.gen_type_id += 1;
+
+        value
     }
 
     pub fn look_ahead(&mut self) -> &'a Token {
@@ -146,7 +158,9 @@ impl<'a> ParserState<'a> {
             self.skip_spaces();
             self.parse_type()
         } else {
-            Ok(Type::Anonymous)
+            Ok(Type::generic(generate_generic_type_name(
+                self.next_type_id(),
+            )))
         }
     }
 
@@ -743,9 +757,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&self) -> Result<Program<Pos>> {
-        let mut state = ParserState {
-            peekable: self.tokens.iter().peekable(),
-        };
+        let mut state = ParserState::new(self.tokens);
 
         state.expect_keyword(Keyword::Run)?;
         state.skip_spaces();

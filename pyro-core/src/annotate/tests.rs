@@ -10,7 +10,7 @@ fn test_typematch_contravariance_record() {
     let mut target = Type::Record(Record {
         props: vec![Prop {
             label: None,
-            val: Type::integer(),
+            val: Type::generic_with_constraints("a", vec![Type::show()]),
         }],
     });
 
@@ -19,7 +19,7 @@ fn test_typematch_contravariance_record() {
     let param = Type::Record(Record {
         props: vec![Prop {
             label: None,
-            val: Type::show(),
+            val: Type::integer(),
         }],
     });
 

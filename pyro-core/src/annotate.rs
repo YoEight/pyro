@@ -23,22 +23,6 @@ pub struct Ann {
     pub used: HashMap<String, Type>,
 }
 
-fn generate_generic_type_name(mut n: usize) -> String {
-    let mut result = String::new();
-    loop {
-        let ch = ((n % 26) as u8 + b'a') as char;
-        result.push(ch);
-        n /= 26;
-        if n > 0 {
-            n -= 1;
-        } else {
-            break;
-        }
-    }
-
-    result.chars().rev().collect::<String>()
-}
-
 #[derive(Default)]
 struct Ctx {
     scope_id: u32,
@@ -112,14 +96,14 @@ impl Ann {
             used: Default::default(),
         }
     }
-
-    pub fn new(pos: Pos) -> Self {
-        Ann::with_type(Type::Anonymous, pos)
-    }
 }
 
 fn configure_context(ctx: &mut Ctx, pi_std: &Scoped) {
-    ctx.declare(&pi_std, "print", Type::client(Type::show()));
+    ctx.declare(
+        &pi_std,
+        "print",
+        Type::client(Type::generic_with_constraints("a", vec![Type::show()])),
+    );
     ctx.declare(
         pi_std,
         "+",
@@ -180,11 +164,13 @@ fn annotate_proc(
                 });
             }
 
-            if l.tag.r#type == Type::Anonymous {
-                let inferred_type = Type::client(r.tag.r#type.clone());
+            if l.tag.r#type.is_generic() {
+                l.tag.r#type.promote_kind();
+                l.tag.r#type.add_constraint(Type::client_type());
+                let inferred_type = Type::kind_constr(l.tag.r#type, r.tag.r#type.clone());
                 l.tag.r#type = inferred_type.clone();
                 update_val_type_info(ctx, &scope, &mut l, inferred_type.clone());
-            } else if r.tag.r#type == Type::Anonymous {
+            } else if r.tag.r#type.is_generic() {
                 let inferred_type = l.tag.r#type.inner_type();
                 r.tag.r#type = inferred_type.clone();
                 update_val_type_info(ctx, &scope, &mut r, inferred_type.clone());
@@ -217,10 +203,10 @@ fn annotate_proc(
                 });
             }
 
-            if l.tag.r#type == Type::Anonymous {
+            if l.tag.r#type.is_generic() {
                 let inferred_type = Type::server(r.tag.r#type.clone());
                 update_val_type_info(ctx, &scope, &mut l, inferred_type.clone());
-            } else if r.tag.r#type == Type::Anonymous {
+            } else if r.tag.r#type.is_generic() {
                 let inferred_type = l.tag.r#type.inner_type();
                 r.tag.r#type = inferred_type;
             }
@@ -314,7 +300,12 @@ fn update_path_type_info(ctx: &mut Ctx, scope: &Scoped, path: &Vec<String>, infe
     // TODO - I'm pretty sure this code won't work with record projection, for example x.y.
     match path.as_slice() {
         [ident] => {
-            ctx.update(scope, ident, inferred_type);
+            let mut r#type = ctx
+                .look_up(scope, ident)
+                .expect("to be defined at that level");
+
+            r#type.specify(inferred_type);
+            ctx.update(scope, ident, r#type);
         }
         _ => todo!(),
     }
@@ -397,7 +388,7 @@ fn annotate_decl(
     scope: &Scoped,
     decl: Tag<Decl<Pos>, Pos>,
 ) -> Result<Tag<Decl<Ann>, Ann>> {
-    let ann = Ann::new(decl.tag);
+    let ann = Ann::with_type(Type::process(), decl.tag);
     let item = match decl.item {
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
@@ -456,7 +447,11 @@ fn annotate_decl(
 
 fn resolve_type(ctx: &Ctx, scope: &Scoped, pos: Pos, r#type: Type) -> Result<Type> {
     match r#type {
-        Type::Name { name, .. } => {
+        Type::Name {
+            name,
+            generic: false,
+            ..
+        } => {
             if let Some(rn) = ctx.look_up(scope, &name) {
                 Ok(rn.clone())
             } else {
@@ -558,9 +553,7 @@ fn annotate_pat_var(
         pat_var.var.r#type = resolve_type(&ctx, scope, pos, pat_var.var.r#type)?;
         let pat = annotate_pattern(ctx, scope, param)?;
 
-        if pat_var.var.r#type != Type::Anonymous
-            && !pat_var.var.r#type.parent_type_of(&pat.tag.r#type)
-        {
+        if !pat_var.var.r#type.is_generic() && !pat_var.var.r#type.parent_type_of(&pat.tag.r#type) {
             return Err(Error {
                 pos,
                 message: format!(

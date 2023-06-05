@@ -92,6 +92,22 @@ pub struct Var {
     pub r#type: Type,
 }
 
+pub fn generate_generic_type_name(mut n: usize) -> String {
+    let mut result = String::new();
+    loop {
+        let ch = ((n % 26) as u8 + b'a') as char;
+        result.push(ch);
+        n /= 26;
+        if n > 0 {
+            n -= 1;
+        } else {
+            break;
+        }
+    }
+
+    result.chars().rev().collect::<String>()
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type {
     Name {
@@ -101,7 +117,6 @@ pub enum Type {
         generic: bool,
     },
     App(Box<Type>, Box<Type>),
-    Anonymous,
     Record(Record<Type>),
 }
 
@@ -114,16 +129,83 @@ impl Type {
         self.clone()
     }
 
-    pub fn ancestor_tree_contains(&self, r#type: &Type) -> bool {
-        if r#type == &Type::Anonymous {
-            return true;
+    pub fn is_generic(&self) -> bool {
+        match self {
+            Type::Name { generic, .. } => *generic,
+            Type::App(constr, _) => constr.is_generic(),
+            _ => false,
+        }
+    }
+
+    pub fn constraints(&self) -> Vec<Type> {
+        match self {
+            Type::Name { parent, .. } => parent.clone(),
+            Type::App(constr, _) => constr.constraints(),
+            _ => Vec::new(),
+        }
+    }
+
+    pub fn add_constraint(&mut self, constraint: Type) {
+        if let Type::Name {
+            parent,
+            generic: true,
+            ..
+        } = self
+        {
+            parent.push(constraint);
+            return;
         }
 
+        panic!("Can't add type constraint on non generic type: {}", self);
+    }
+
+    pub fn promote_kind(&mut self) {
+        if let Type::Name { kind, .. } = self {
+            *kind += 1;
+            return;
+        }
+
+        panic!("Can't promote kind order on non generic type: {}", self);
+    }
+
+    pub fn outer(&mut self) -> &mut Type {
+        match self {
+            Type::App(constr, _) => constr.outer(),
+            _ => self,
+        }
+    }
+
+    pub fn specify(&mut self, precise_type: Type) {
+        if let Type::Name {
+            generic: true,
+            parent,
+            ..
+        } = self.outer()
+        {
+            if precise_type.is_generic() {
+                parent.extend(precise_type.constraints());
+            } else {
+                *self = precise_type;
+            }
+        }
+    }
+
+    pub fn ancestor_tree_contains(&self, r#type: &Type) -> bool {
         if self != r#type {
             match self {
-                Type::Name { parent, .. } => parent
-                    .iter()
-                    .any(|ancestor| ancestor.ancestor_tree_contains(r#type)),
+                Type::Name {
+                    parent, generic, ..
+                } => {
+                    if r#type.is_generic() {
+                        r#type.constraints().iter().all(|c| parent.contains(c))
+                    } else if !*generic {
+                        parent
+                            .iter()
+                            .any(|ancestor| ancestor.ancestor_tree_contains(r#type))
+                    } else {
+                        false
+                    }
+                }
 
                 Type::App(self_cons, self_inner) => {
                     if let Type::App(type_cons, type_inner) = r#type {
@@ -133,7 +215,6 @@ impl Type {
                         self_cons.ancestor_tree_contains(r#type)
                     }
                 }
-                Type::Anonymous => true,
                 Type::Record(self_rec) => {
                     if let Type::Record(rec_type) = r#type {
                         if self_rec.props.len() != rec_type.props.len() {
@@ -186,7 +267,6 @@ impl Type {
     pub fn kind(&self, location: Pos) -> crate::Result<u16> {
         match self {
             Type::Name { kind, .. } => Ok(*kind),
-            Type::Anonymous => Ok(0),
             Type::Record(_) => Ok(0),
 
             Type::App(l, r) => {
@@ -298,6 +378,10 @@ impl Type {
         }
     }
 
+    pub fn kind_constr(constr: Type, inner: Type) -> Self {
+        Type::App(Box::new(constr), Box::new(inner))
+    }
+
     pub fn func(param: Type, result: Type) -> Self {
         Type::App(
             Box::new(Type::func_type()),
@@ -320,6 +404,19 @@ impl Type {
             name: name.as_ref().to_string(),
             kind: 0,
             generic: false,
+        }
+    }
+
+    pub fn generic(name: impl AsRef<str>) -> Self {
+        Type::generic_with_constraints(name, vec![])
+    }
+
+    pub fn generic_with_constraints(name: impl AsRef<str>, parent: Vec<Type>) -> Self {
+        Type::Name {
+            parent,
+            name: name.as_ref().to_string(),
+            kind: 0,
+            generic: true,
         }
     }
 
@@ -356,7 +453,6 @@ impl std::fmt::Display for Type {
                 b.fmt(f)
             }
 
-            Type::Anonymous => write!(f, "_"),
             Type::Record(r) => write!(f, "{}", r),
         }
     }
