@@ -153,7 +153,59 @@ fn annotate_proc(
             let mut l = annotate_val(ctx, &scope, ValCtx::Output, l)?;
             let mut r = annotate_val(ctx, &scope, ValCtx::Regular, r)?;
 
-            if !l.tag.r#type.typecheck_client_call(&r.tag.r#type) {
+            if l.tag.r#type.is_generic() {
+                if !l.tag.r#type.meets_requirement(&Type::client_type()) {
+                    l.tag.r#type.add_constraint(Type::client_type());
+                    l.tag.r#type = Type::kind_constr(l.tag.r#type, Type::generic("a"));
+                }
+            } else if !l.tag.r#type.meets_requirement(&Type::client_type()) {
+                return Err(Error {
+                    pos: r.tag.pos,
+                    message: format!("Type '{}' doesn't inherits 'Client'", l.tag.r#type),
+                });
+            }
+
+            if r.tag.r#type.is_generic() {
+                let inner_type = l.tag.r#type.inner_type_mut();
+
+                if inner_type.is_generic() {
+                    let constraints = r.tag.r#type.constraints();
+                    inner_type.add_constraints(constraints);
+                    r.tag.r#type = inner_type.clone();
+                    update_val_type_info(ctx, &scope, &mut r, inner_type.clone());
+                } else {
+                    let constraints = r.tag.r#type.constraints();
+                    if inner_type.meets_requirements(&constraints) {
+                        r.tag.r#type = inner_type.clone();
+                        update_val_type_info(ctx, &scope, &mut r, inner_type.clone());
+                    } else {
+                        return Err(Error {
+                            pos: r.tag.pos,
+                            message: format!(
+                                "Type '{}' doesn't inherits from {:?}",
+                                inner_type, constraints,
+                            ),
+                        });
+                    }
+                }
+            } else if l.tag.r#type.inner_type().is_generic() {
+                let constraints = l.tag.r#type.inner_type().constraints();
+
+                if !r.tag.r#type.meets_requirements(&constraints) {
+                    return Err(Error {
+                        pos: l.tag.pos,
+                        message: format!(
+                            "Type '{}' doesn't inherits from {:?}",
+                            l.tag.r#type.inner_type(),
+                            constraints,
+                        ),
+                    });
+                }
+
+                *l.tag.r#type.inner_type_mut() = r.tag.r#type.clone();
+                let l_type = l.tag.r#type.clone();
+                update_val_type_info(ctx, &scope, &mut l, l_type);
+            } else if !l.tag.r#type.typecheck_client_call(&r.tag.r#type) {
                 return Err(Error {
                     pos: r.tag.pos,
                     message: format!(
@@ -162,18 +214,6 @@ fn annotate_proc(
                         r.tag.r#type
                     ),
                 });
-            }
-
-            if l.tag.r#type.is_generic() {
-                l.tag.r#type.promote_kind();
-                l.tag.r#type.add_constraint(Type::client_type());
-                let inferred_type = Type::kind_constr(l.tag.r#type, r.tag.r#type.clone());
-                l.tag.r#type = inferred_type.clone();
-                update_val_type_info(ctx, &scope, &mut l, inferred_type.clone());
-            } else if r.tag.r#type.is_generic() {
-                let inferred_type = l.tag.r#type.inner_type();
-                r.tag.r#type = inferred_type.clone();
-                update_val_type_info(ctx, &scope, &mut r, inferred_type.clone());
             }
 
             ann.used.extend(l.tag.used.clone());
@@ -300,12 +340,7 @@ fn update_path_type_info(ctx: &mut Ctx, scope: &Scoped, path: &Vec<String>, infe
     // TODO - I'm pretty sure this code won't work with record projection, for example x.y.
     match path.as_slice() {
         [ident] => {
-            let mut r#type = ctx
-                .look_up(scope, ident)
-                .expect("to be defined at that level");
-
-            r#type.specify(inferred_type);
-            ctx.update(scope, ident, r#type);
+            ctx.update(scope, ident, inferred_type);
         }
         _ => todo!(),
     }
@@ -719,7 +754,7 @@ fn annotate_val(
             let caller = annotate_val(ctx, &scope, val_ctx, *caller)?;
             let param = annotate_val(ctx, &scope, val_ctx, *param)?;
 
-            if !caller.tag.r#type.ancestor_tree_contains(&Type::func_type()) {
+            if !caller.tag.r#type.meets_requirement(&Type::func_type()) {
                 return Err(Error {
                     pos: caller.tag.pos,
                     message: format!(

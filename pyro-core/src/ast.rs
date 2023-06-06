@@ -146,17 +146,33 @@ impl Type {
     }
 
     pub fn add_constraint(&mut self, constraint: Type) {
+        self.add_constraints(vec![constraint])
+    }
+
+    pub fn add_constraints(&mut self, constraints: Vec<Type>) {
         if let Type::Name {
             parent,
             generic: true,
             ..
         } = self
         {
-            parent.push(constraint);
+            parent.extend(constraints);
             return;
         }
 
+        if let Type::App(constr, _) = self {
+            return constr.add_constraints(constraints);
+        }
+
         panic!("Can't add type constraint on non generic type: {}", self);
+    }
+
+    pub fn inner_type_mut(&mut self) -> &mut Type {
+        if let Type::App(_, inner) = self {
+            return inner.as_mut();
+        }
+
+        self
     }
 
     pub fn promote_kind(&mut self) {
@@ -175,22 +191,11 @@ impl Type {
         }
     }
 
-    pub fn specify(&mut self, precise_type: Type) {
-        if let Type::Name {
-            generic: true,
-            parent,
-            ..
-        } = self.outer()
-        {
-            if precise_type.is_generic() {
-                parent.extend(precise_type.constraints());
-            } else {
-                *self = precise_type;
-            }
-        }
+    pub fn meets_requirements(&self, constraints: &Vec<Type>) -> bool {
+        constraints.iter().all(|t| self.meets_requirement(t))
     }
 
-    pub fn ancestor_tree_contains(&self, r#type: &Type) -> bool {
+    pub fn meets_requirement(&self, r#type: &Type) -> bool {
         if self != r#type {
             match self {
                 Type::Name {
@@ -201,7 +206,7 @@ impl Type {
                     } else if !*generic {
                         parent
                             .iter()
-                            .any(|ancestor| ancestor.ancestor_tree_contains(r#type))
+                            .any(|ancestor| ancestor.meets_requirement(r#type))
                     } else {
                         false
                     }
@@ -209,10 +214,10 @@ impl Type {
 
                 Type::App(self_cons, self_inner) => {
                     if let Type::App(type_cons, type_inner) = r#type {
-                        self_cons.ancestor_tree_contains(type_cons)
-                            && self_inner.ancestor_tree_contains(type_inner)
+                        self_cons.meets_requirement(type_cons)
+                            && self_inner.meets_requirement(type_inner)
                     } else {
-                        self_cons.ancestor_tree_contains(r#type)
+                        self_cons.meets_requirement(r#type)
                     }
                 }
                 Type::Record(self_rec) => {
@@ -224,7 +229,7 @@ impl Type {
                         for (rec_prop, type_prop) in
                             self_rec.props.iter().zip(rec_type.props.iter())
                         {
-                            if !rec_prop.val.ancestor_tree_contains(&type_prop.val) {
+                            if !rec_prop.val.meets_requirement(&type_prop.val) {
                                 return false;
                             }
                         }
@@ -241,13 +246,13 @@ impl Type {
     }
 
     pub fn parent_type_of(&self, child: &Type) -> bool {
-        child.ancestor_tree_contains(self)
+        child.meets_requirement(self)
     }
 
     pub fn apply(&self, param: &Type) -> Option<Type> {
         match self {
             Type::App(caller, tail) => {
-                if !caller.ancestor_tree_contains(&Type::func_type()) {
+                if !caller.meets_requirement(&Type::func_type()) {
                     return None;
                 }
 
@@ -378,7 +383,8 @@ impl Type {
         }
     }
 
-    pub fn kind_constr(constr: Type, inner: Type) -> Self {
+    pub fn kind_constr(mut constr: Type, inner: Type) -> Self {
+        constr.promote_kind();
         Type::App(Box::new(constr), Box::new(inner))
     }
 
@@ -421,15 +427,15 @@ impl Type {
     }
 
     pub fn typecheck_client_call(&self, params: &Type) -> bool {
-        if !self.ancestor_tree_contains(&Type::client_type()) {
+        if !self.meets_requirement(&Type::client_type()) {
             return false;
         }
 
-        self.inner_type().parent_type_of(params)
+        params.parent_type_of(&self.inner_type())
     }
 
     pub fn typecheck_server_call(&self, params: &Type) -> bool {
-        if !self.ancestor_tree_contains(&Type::server_type()) {
+        if !self.meets_requirement(&Type::server_type()) {
             return false;
         }
 
