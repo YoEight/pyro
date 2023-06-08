@@ -228,28 +228,71 @@ fn annotate_proc(
         Proc::Input(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag);
             let mut l = annotate_val(ctx, &scope, ValCtx::Input, l)?;
-            let (pat_type, mut r) = annotate_abs(ctx, &scope, r, None)?;
+            let (pat_type, r) = annotate_abs(ctx, &scope, r, None)?;
 
-            ann.used.extend(l.tag.used.clone());
-            ann.used.extend(r.tag.used.clone());
+            if l.tag.r#type.is_generic() {
+                if !l.tag.r#type.meets_requirement(&Type::server_type()) {
+                    l.tag.r#type.add_constraint(Type::server_type());
+                    l.tag.r#type = Type::kind_constr(l.tag.r#type, Type::generic("a"));
+                }
+            } else if !l.tag.r#type.meets_requirement(&Type::server_type()) {
+                return Err(Error {
+                    pos: r.tag.pos,
+                    message: format!("Type '{}' doesn't inherits 'Server'", l.tag.r#type),
+                });
+            }
 
-            if !l.tag.r#type.typecheck_server_call(&pat_type) {
+            if pat_type.is_generic() {
+                let inner_type = l.tag.r#type.inner_type_mut();
+
+                if inner_type.is_generic() {
+                    let constraints = pat_type.constraints();
+                    inner_type.add_constraints(constraints);
+                    // TODO - We might want to pass down those type information that we found.
+                } else {
+                    let constraints = pat_type.constraints();
+                    if inner_type.meets_requirements(&constraints) {
+                        // TODO - We might want to pass down those type information that we found.
+                    } else {
+                        return Err(Error {
+                            pos: r.tag.pos,
+                            message: format!(
+                                "Type '{}' doesn't inherits from {:?}",
+                                inner_type, constraints,
+                            ),
+                        });
+                    }
+                }
+            } else if l.tag.r#type.inner_type().is_generic() {
+                let constraints = l.tag.r#type.inner_type().constraints();
+
+                if !pat_type.meets_requirements(&constraints) {
+                    return Err(Error {
+                        pos: l.tag.pos,
+                        message: format!(
+                            "Type '{}' doesn't inherits from {:?}",
+                            l.tag.r#type.inner_type(),
+                            constraints,
+                        ),
+                    });
+                }
+
+                *l.tag.r#type.inner_type_mut() = pat_type.clone();
+                let l_type = l.tag.r#type.clone();
+                update_val_type_info(ctx, &scope, &mut l, l_type);
+            } else if !l.tag.r#type.typecheck_server_call(&pat_type) {
                 return Err(Error {
                     pos: r.tag.pos,
                     message: format!(
                         "Expected type '{}' but got '{}' instead",
-                        l.tag.r#type, pat_type
+                        l.tag.r#type.inner_type(),
+                        r.tag.r#type
                     ),
                 });
             }
 
-            if l.tag.r#type.is_generic() {
-                let inferred_type = Type::server(r.tag.r#type.clone());
-                update_val_type_info(ctx, &scope, &mut l, inferred_type.clone());
-            } else if r.tag.r#type.is_generic() {
-                let inferred_type = l.tag.r#type.inner_type();
-                r.tag.r#type = inferred_type;
-            }
+            ann.used.extend(l.tag.used.clone());
+            ann.used.extend(r.tag.used.clone());
 
             Ok(Tag {
                 tag: ann,
