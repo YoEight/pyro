@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "pyro-core",
+    "pyro-runtime",
     "pyro",
 ]

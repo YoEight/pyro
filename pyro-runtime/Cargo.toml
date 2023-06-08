@@ -1,5 +1,5 @@
 [package]
-name = "pyro"
+name = "pyro-runtime"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,16 +8,9 @@ edition = "2021"
 [dependencies.pyro-core]
 path = "../pyro-core"
 
-[dependencies.pyro-runtime]
-path = "../pyro-runtime"
-
-[dependencies.clap]
-version = "4.3"
-features = ["derive"]
-
 [dependencies.tokio]
 version = "1"
-features = ["full"]
+features = ["sync"]
 
 [dependencies]
 eyre = "0.6"
