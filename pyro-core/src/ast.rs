@@ -1,5 +1,6 @@
 use crate::sym::Literal;
 use crate::{Error, Pos};
+use std::future::Future;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Program<A> {
@@ -469,6 +470,12 @@ pub struct Record<A> {
     pub props: Vec<Prop<A>>,
 }
 
+impl<A> Record<A> {
+    pub fn empty() -> Self {
+        Self { props: vec![] }
+    }
+}
+
 impl<A> std::fmt::Display for Record<A>
 where
     A: std::fmt::Display,
@@ -512,6 +519,20 @@ impl<A> Record<A> {
 
         for prop in self.props {
             props.push(prop.traverse_result(&mut fun)?);
+        }
+
+        Ok(Record { props })
+    }
+
+    pub async fn traverse_result_async<F, Fut, B, E>(self, mut fun: F) -> Result<Record<B>, E>
+    where
+        F: FnMut(A) -> Fut,
+        Fut: Future<Output = Result<B, E>>,
+    {
+        let mut props = Vec::new();
+
+        for prop in self.props {
+            props.push(prop.traverse_result_async(&mut fun).await?);
         }
 
         Ok(Record { props })
@@ -585,6 +606,18 @@ impl<A> Prop<A> {
         }
     }
 
+    pub fn replace<B>(self, val: B) -> (A, Prop<B>) {
+        let old = self.val;
+
+        (
+            old,
+            Prop {
+                label: self.label,
+                val,
+            },
+        )
+    }
+
     pub fn traverse_result<F, B, E>(self, fun: F) -> Result<Prop<B>, E>
     where
         F: FnOnce(A) -> Result<B, E>,
@@ -594,6 +627,19 @@ impl<A> Prop<A> {
         Ok(Prop {
             val,
             label: self.label,
+        })
+    }
+
+    pub(crate) async fn traverse_result_async<F, Fut, B, E>(self, fun: &mut F) -> Result<Prop<B>, E>
+    where
+        F: FnMut(A) -> Fut,
+        Fut: Future<Output = Result<B, E>>,
+    {
+        let val = fun(self.val).await?;
+
+        Ok(Prop {
+            label: self.label,
+            val,
         })
     }
 }

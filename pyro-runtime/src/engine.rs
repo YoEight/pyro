@@ -3,7 +3,7 @@ use crate::prelude::load_prelude_symbols;
 use crate::runtime::Runtime;
 use crate::value::{Channel, RuntimeValue};
 use pyro_core::annotate::Ann;
-use pyro_core::ast::{Abs, Pat, Proc, Tag, Val};
+use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
 use pyro_core::sym::Literal;
 use tokio::sync::mpsc;
 
@@ -120,7 +120,7 @@ async fn execute_proc(
 
     match proc.item {
         Proc::Output(target, param) => {
-            if let Some(suspend) = execute_output(&mut runtime, target, param)? {
+            if let Some(suspend) = execute_output(&mut runtime, target, param).await? {
                 sus.push(suspend);
             }
         }
@@ -150,7 +150,7 @@ async fn execute_proc(
         }
 
         Proc::Cond(test, if_proc, else_proc) => {
-            let test = resolve(&mut runtime, test.item)?;
+            let test = interpret(&mut runtime, test.item).await?;
             let test = test.bool()?;
             let proc = if test { if_proc } else { else_proc };
 
@@ -164,7 +164,7 @@ async fn execute_proc(
     Ok(sus)
 }
 
-fn execute_output(
+async fn execute_output(
     runtime: &mut Runtime,
     target: Tag<Val<Ann>, Ann>,
     param: Tag<Val<Ann>, Ann>,
@@ -176,7 +176,7 @@ fn execute_output(
             RuntimeValue::Channel(Channel::Client(c) | Channel::Dual(_, c)) => c,
 
             RuntimeValue::Abs(abs) => {
-                let value = resolve(runtime, param.item)?;
+                let value = interpret(runtime, param.item).await?;
 
                 update_scope(runtime, &value, abs.item.pattern.item);
 
@@ -197,7 +197,7 @@ fn execute_output(
         );
     };
 
-    let value = resolve(runtime, param.item)?;
+    let value = interpret(runtime, param.item).await?;
     let _ = target.send(value);
 
     Ok(None)
@@ -264,25 +264,97 @@ fn update_scope(runtime: &mut Runtime, value: &RuntimeValue, pattern: Pat<Ann>) 
     }
 }
 
-fn resolve(runtime: &mut Runtime, value: Val<Ann>) -> eyre::Result<RuntimeValue> {
-    match value {
-        Val::Literal(l) => Ok(RuntimeValue::Literal(l.clone())),
-        Val::Path(paths) => runtime.look_up(&build_var_id(&paths)),
-        Val::Record(r) => Ok(RuntimeValue::Record(
-            r.traverse_result(|v| resolve(runtime, v.item))?,
-        )),
-        Val::AnoClient(abs) => Ok(RuntimeValue::Abs(abs)),
-        Val::App(func, param) => {
-            let func = resolve(runtime, func.item)?;
-            let param = resolve(runtime, param.item)?;
+async fn interpret(runtime: &mut Runtime, value: Val<Ann>) -> eyre::Result<RuntimeValue> {
+    let mut stack = vec![Instr::I(value)];
 
-            if let RuntimeValue::Fun(cont) = func {
-                return Ok(cont(param));
-            }
+    enum Instr {
+        I(Val<Ann>),
+        V(RuntimeValue),
+    }
 
-            eyre::bail!("Unreachable code, means the type checking failed us :'-(")
+    enum State {
+        Idle,
+        Apply(u8, Option<RuntimeValue>),
+        Rec(Vec<Prop<()>>, Vec<Prop<RuntimeValue>>),
+    }
+
+    let mut state = State::Idle;
+    while let Some(instr) = stack.pop() {
+        match instr {
+            Instr::V(value) => match state {
+                State::Idle => return Ok(value),
+                State::Apply(mut count, func) => {
+                    if let Some(func) = func {
+                        let func = func.suspension()?;
+                        let value = func(value).await?;
+                        count -= 1;
+
+                        if count == 0 {
+                            stack.push(Instr::V(value));
+                            state = State::Idle;
+                        } else {
+                            let new_func = value;
+                            state = State::Apply(count, Some(new_func));
+                        }
+                    } else {
+                        state = State::Apply(count, Some(value));
+                    }
+                }
+                State::Rec(mut expectations, mut props) => {
+                    if let Some(prop) = expectations.pop() {
+                        let (_, prop) = prop.replace(value);
+                        props.push(prop);
+
+                        if expectations.is_empty() {
+                            state = State::Idle;
+                            stack.push(Instr::V(RuntimeValue::Record(Record { props })));
+                        } else {
+                            state = State::Rec(expectations, props);
+                        }
+
+                        continue;
+                    }
+
+                    eyre::bail!("Unexpected runtime error when building record");
+                }
+            },
+
+            Instr::I(val) => match val {
+                Val::Literal(l) => stack.push(Instr::V(RuntimeValue::Literal(l))),
+                Val::Path(paths) => stack.push(Instr::V(runtime.look_up(&build_var_id(&paths))?)),
+                Val::AnoClient(abs) => stack.push(Instr::V(RuntimeValue::Abs(abs))),
+
+                Val::Record(mut r) => {
+                    let mut props = Vec::new();
+
+                    while let Some(prop) = r.props.pop() {
+                        let (tag, prop) = prop.replace(());
+                        stack.push(Instr::I(tag.item));
+                        props.push(prop);
+                    }
+
+                    if props.is_empty() {
+                        stack.push(Instr::V(RuntimeValue::Record(Record::empty())))
+                    } else {
+                        state = State::Rec(props, Vec::new());
+                    }
+                }
+
+                Val::App(func, param) => {
+                    stack.push(Instr::I(param.item));
+                    stack.push(Instr::I(func.item));
+
+                    if let State::Apply(count, _) = &mut state {
+                        *count += 1;
+                    } else {
+                        state = State::Apply(1, None);
+                    }
+                }
+            },
         }
     }
+
+    eyre::bail!("Invalid stack error!")
 }
 
 fn build_var_id(paths: &[String]) -> String {
