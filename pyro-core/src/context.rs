@@ -75,9 +75,8 @@ impl Ctx {
     }
 
     pub fn update(&mut self, scope: &LocalScope, name: impl AsRef<str>, r#type: Type) {
-        let mut ancestors = scope.ancestors.clone();
-        while let Some(scope_id) = ancestors.pop() {
-            if let Some(variables) = self.variables_new.get_mut(&scope_id) {
+        for scope_id in scope.ancestors().iter().rev() {
+            if let Some(variables) = self.variables_new.get_mut(scope_id) {
                 variables.insert(name.as_ref().to_string(), r#type);
                 return;
             }
