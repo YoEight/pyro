@@ -1,10 +1,10 @@
 use crate::env::Env;
-use crate::prelude::load_prelude_symbols;
 use crate::runtime::Runtime;
-use crate::value::{Channel, RuntimeValue};
+use crate::value::{Channel, RuntimeValue, Symbol};
 use pyro_core::annotate::Ann;
-use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
+use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Type, Val};
 use pyro_core::sym::Literal;
+use pyro_core::{Ctx, STDLIB};
 use tokio::sync::mpsc;
 
 struct Suspend {
@@ -17,26 +17,64 @@ enum Msg {
     Completed(u64),
 }
 
-pub struct Engine {
-    runtime: Runtime,
+#[derive(Default)]
+pub struct EngineBuilder {
+    symbols: Vec<Symbol>,
 }
 
-impl Engine {
-    pub fn new() -> Self {
+impl EngineBuilder {
+    pub fn build(mut self) -> Engine {
         let (print_output, print_input) = mpsc::unbounded_channel();
         let env = Env {
             stdout_handle: print_output,
         };
+        let stdout = env.stdout();
 
-        let runtime = load_prelude_symbols(&env);
+        let mut runtime = Runtime::new(env);
+
+        let mut ctx = Ctx::default();
+        self.symbols.push(Symbol {
+            name: "print".to_string(),
+            r#type: Type::client(Type::generic_with_constraints("a", vec![Type::show()])),
+            value: RuntimeValue::Channel(Channel::Client(stdout)),
+        });
+
+        self.symbols
+            .push(Symbol::func_2("+", |a: u64, b: u64| a + b));
+        self.symbols
+            .push(Symbol::func_2("<=", |a: u64, b: u64| a <= b));
+
+        for sym in self.symbols {
+            ctx.declare(&STDLIB, &sym.name, sym.r#type);
+            runtime.insert(sym.name, sym.value);
+        }
+
+        ctx.declare(&STDLIB, "String", Type::string());
+        ctx.declare(&STDLIB, "Bool", Type::bool());
+        ctx.declare(&STDLIB, "Integer", Type::integer());
+        ctx.declare(&STDLIB, "Char", Type::char());
+        ctx.declare(&STDLIB, "Client", Type::client_type());
+        ctx.declare(&STDLIB, "Server", Type::server_type());
+        ctx.declare(&STDLIB, "Channel", Type::channel_type());
 
         spawn_stdout_process(print_input);
 
-        Self { runtime }
+        Engine { runtime, ctx }
+    }
+}
+
+pub struct Engine {
+    runtime: Runtime,
+    ctx: Ctx,
+}
+
+impl Engine {
+    pub fn builder() -> EngineBuilder {
+        EngineBuilder::default()
     }
 
     pub async fn run(self, source_code: &str) -> eyre::Result<()> {
-        let progs = pyro_core::parse(source_code)?;
+        let progs = pyro_core::parse(self.ctx, source_code)?;
         let mut work_items = Vec::new();
         let (sender, mut mailbox) = mpsc::unbounded_channel::<Msg>();
 

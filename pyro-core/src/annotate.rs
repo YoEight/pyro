@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Type};
 use crate::ast::{Proc, Program, Tag, Val};
+use crate::context::{LocalScope, STDLIB};
 use crate::sym::Literal;
-use crate::Result;
-use crate::{Error, Pos};
+use crate::{Ctx, Error, Pos, Result};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 enum ValCtx {
@@ -23,71 +23,6 @@ pub struct Ann {
     pub used: HashMap<String, Type>,
 }
 
-#[derive(Default)]
-struct Ctx {
-    scope_id: u32,
-    variables_new: HashMap<u32, HashMap<String, Type>>,
-}
-
-impl Ctx {
-    pub fn new_scope(&mut self, parent: &Scoped) -> Scoped {
-        self.scope_id += 1;
-        let id = self.scope_id;
-        let mut ancestors = parent.ancestors.clone();
-
-        ancestors.push(id);
-
-        Scoped { ancestors }
-    }
-
-    pub fn look_up(&self, scope: &Scoped, name: &str) -> Option<Type> {
-        let mut ancestors = scope.ancestors.clone();
-        while let Some(scope_id) = ancestors.pop() {
-            if let Some(variables) = self.variables_new.get(&scope_id) {
-                if let Some(r#type) = variables.get(name) {
-                    return Some(r#type.clone());
-                }
-            }
-        }
-
-        None
-    }
-
-    pub fn declare(&mut self, scope: &Scoped, name: impl AsRef<str>, r#type: Type) -> bool {
-        let scope_id = scope.ancestors.last().copied().unwrap();
-        let variables = self.variables_new.entry(scope_id).or_default();
-
-        if variables.contains_key(name.as_ref()) {
-            return false;
-        }
-
-        variables.insert(name.as_ref().to_string(), r#type);
-
-        true
-    }
-
-    pub fn update(&mut self, scope: &Scoped, name: impl AsRef<str>, r#type: Type) {
-        let mut ancestors = scope.ancestors.clone();
-        while let Some(scope_id) = ancestors.pop() {
-            if let Some(variables) = self.variables_new.get_mut(&scope_id) {
-                variables.insert(name.as_ref().to_string(), r#type);
-                return;
-            }
-        }
-    }
-}
-
-#[derive(Default, Clone)]
-struct Scoped {
-    ancestors: Vec<u32>,
-}
-
-impl Scoped {
-    pub fn std() -> Self {
-        Self { ancestors: vec![0] }
-    }
-}
-
 impl Ann {
     pub fn with_type(r#type: Type, pos: Pos) -> Self {
         Self {
@@ -98,44 +33,11 @@ impl Ann {
     }
 }
 
-fn configure_context(ctx: &mut Ctx, pi_std: &Scoped) {
-    ctx.declare(
-        &pi_std,
-        "print",
-        Type::client(Type::generic_with_constraints("a", vec![Type::show()])),
-    );
-    ctx.declare(
-        pi_std,
-        "+",
-        Type::func(
-            Type::integer(),
-            Type::func(Type::integer(), Type::integer()),
-        ),
-    );
-    ctx.declare(
-        pi_std,
-        "<=",
-        Type::func(Type::integer(), Type::func(Type::integer(), Type::bool())),
-    );
-
-    ctx.declare(pi_std, "String", Type::string());
-    ctx.declare(pi_std, "Bool", Type::bool());
-    ctx.declare(pi_std, "Integer", Type::integer());
-    ctx.declare(pi_std, "Char", Type::char());
-    ctx.declare(pi_std, "Client", Type::client_type());
-    ctx.declare(pi_std, "Server", Type::server_type());
-    ctx.declare(pi_std, "Channel", Type::channel_type());
-}
-
-pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
+pub fn annotate_program(mut ctx: Ctx, prog: Program<Pos>) -> Result<Program<Ann>> {
     let mut annotated = Vec::new();
-    let mut ctx = Ctx::default();
-    let pi_std = Scoped::std();
-
-    configure_context(&mut ctx, &pi_std);
 
     for proc in prog.procs {
-        let new_scope = ctx.new_scope(&pi_std);
+        let new_scope = ctx.new_scope(&STDLIB);
         annotated.push(annotate_proc(&mut ctx, new_scope, proc)?);
     }
 
@@ -144,7 +46,7 @@ pub fn annotate_program(prog: Program<Pos>) -> Result<Program<Ann>> {
 
 fn annotate_proc(
     ctx: &mut Ctx,
-    scope: Scoped,
+    scope: LocalScope,
     proc: Tag<Proc<Pos>, Pos>,
 ) -> Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
@@ -366,7 +268,7 @@ fn annotate_proc(
 
 fn update_val_type_info(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     node: &mut Tag<Val<Ann>, Ann>,
     inferred_type: Type,
 ) {
@@ -379,7 +281,12 @@ fn update_val_type_info(
     node.tag.r#type = inferred_type;
 }
 
-fn update_path_type_info(ctx: &mut Ctx, scope: &Scoped, path: &Vec<String>, inferred_type: Type) {
+fn update_path_type_info(
+    ctx: &mut Ctx,
+    scope: &LocalScope,
+    path: &Vec<String>,
+    inferred_type: Type,
+) {
     // TODO - I'm pretty sure this code won't work with record projection, for example x.y.
     match path.as_slice() {
         [ident] => {
@@ -391,14 +298,14 @@ fn update_path_type_info(ctx: &mut Ctx, scope: &Scoped, path: &Vec<String>, infe
 
 fn annotate_abs(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     tag: Tag<Abs<Pos>, Pos>,
     named: Option<String>,
 ) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
     let mut pattern = annotate_pattern(ctx, &scope, tag.item.pattern)?;
 
     if let Some(def_name) = named {
-        if !ctx.declare(&scope, &def_name, Type::client(pattern.tag.r#type.clone())) {
+        if !ctx.declare(scope, &def_name, Type::client(pattern.tag.r#type.clone())) {
             return Err(Error {
                 pos: tag.tag,
                 message: format!("Definition '{}' already exists", def_name),
@@ -406,7 +313,7 @@ fn annotate_abs(
         }
     }
 
-    let new_scope = ctx.new_scope(&scope);
+    let new_scope = ctx.new_scope(scope);
     let proc = annotate_proc(ctx, new_scope, *tag.item.proc)?;
     let mut ann = proc.tag.clone();
 
@@ -427,7 +334,7 @@ fn annotate_abs(
     ))
 }
 
-fn update_pattern_type_info(ctx: &mut Ctx, scope: &Scoped, node: &mut Tag<Pat<Ann>, Ann>) {
+fn update_pattern_type_info(ctx: &mut Ctx, scope: &LocalScope, node: &mut Tag<Pat<Ann>, Ann>) {
     match &mut node.item {
         Pat::Var(var) => {
             update_pat_var_type_info(ctx, scope, var);
@@ -447,7 +354,7 @@ fn update_pattern_type_info(ctx: &mut Ctx, scope: &Scoped, node: &mut Tag<Pat<An
 
 fn update_pat_rec_type_info(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     rec: &mut Record<Tag<Pat<Ann>, Ann>>,
 ) -> Type {
     rec.for_each(|node| update_pattern_type_info(ctx, scope, node));
@@ -456,14 +363,14 @@ fn update_pat_rec_type_info(
     Type::Record(r#type)
 }
 
-fn update_pat_var_type_info(ctx: &mut Ctx, scope: &Scoped, pat_var: &mut PatVar<Ann>) {
+fn update_pat_var_type_info(ctx: &mut Ctx, scope: &LocalScope, pat_var: &mut PatVar<Ann>) {
     let r#type = ctx.look_up(scope, &pat_var.var.id).unwrap();
     pat_var.var.r#type = r#type.clone();
 }
 
 fn annotate_decl(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     decl: Tag<Decl<Pos>, Pos>,
 ) -> Result<Tag<Decl<Ann>, Ann>> {
     let ann = Ann::with_type(Type::process(), decl.tag);
@@ -475,7 +382,7 @@ fn annotate_decl(
                 let (n, t) = decl_tag.item;
                 let t = resolve_type(&ctx, &scope, decl.tag, t)?;
 
-                if !ctx.declare(&scope, &n, t.clone()) {
+                if !ctx.declare(scope, &n, t.clone()) {
                     return Err(Error {
                         pos: decl_tag.tag,
                         message: format!("Channel '{}' already exists", n),
@@ -493,7 +400,7 @@ fn annotate_decl(
 
         Decl::Type(n, t) => {
             let resolved_type = resolve_type(&ctx, &scope, decl.tag, t)?;
-            ctx.declare(&scope, &n, resolved_type.clone());
+            ctx.declare(scope, &n, resolved_type.clone());
             Decl::Type(n, resolved_type)
         }
 
@@ -523,7 +430,7 @@ fn annotate_decl(
     Ok(Tag { item, tag: ann })
 }
 
-fn resolve_type(ctx: &Ctx, scope: &Scoped, pos: Pos, r#type: Type) -> Result<Type> {
+fn resolve_type(ctx: &Ctx, scope: &LocalScope, pos: Pos, r#type: Type) -> Result<Type> {
     match r#type {
         Type::Name {
             name,
@@ -568,7 +475,7 @@ fn literal_type(lit: &Literal) -> Type {
 
 fn annotate_pattern(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     tag: Tag<Pat<Pos>, Pos>,
 ) -> Result<Tag<Pat<Ann>, Ann>> {
     match tag.item {
@@ -618,7 +525,7 @@ fn annotate_pattern(
 }
 fn annotate_pat_var(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     pos: Pos,
     mut pat_var: PatVar<Pos>,
 ) -> Result<Tag<PatVar<Ann>, Ann>> {
@@ -665,7 +572,7 @@ fn annotate_pat_var(
 
 fn annotate_val(
     ctx: &mut Ctx,
-    scope: &Scoped,
+    scope: &LocalScope,
     val_ctx: ValCtx,
     lit: Tag<Val<Pos>, Pos>,
 ) -> Result<Tag<Val<Ann>, Ann>> {

@@ -22,6 +22,6 @@ async fn main() -> eyre::Result<()> {
         println!("Tokens: {:?}", pyro_core::tokenize(source.as_str()));
     }
 
-    let engine = Engine::new();
+    let engine = Engine::builder().build();
     engine.run(source.as_str()).await
 }

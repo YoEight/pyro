@@ -5,9 +5,12 @@ use tokenizer::{Token, Tokenizer};
 
 pub mod annotate;
 pub mod ast;
+mod context;
 pub mod parser;
 pub mod sym;
 pub mod tokenizer;
+
+pub use context::{Ctx, STDLIB};
 
 /// Location in input string
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -40,10 +43,10 @@ pub fn tokenize(src: &str) -> eyre::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-pub fn parse(src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
+pub fn parse(ctx: Ctx, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
     let tokens = tokenize(src)?;
     let parser = Parser::new(tokens.as_slice());
-    let program = annotate_program(parser.parse()?)?;
+    let program = annotate_program(ctx, parser.parse()?)?;
 
     Ok(program.procs)
 }
