@@ -20,6 +20,7 @@ enum Msg {
 #[derive(Default)]
 pub struct EngineBuilder {
     symbols: Vec<Symbol>,
+    types: Vec<(String, Type)>,
 }
 
 impl EngineBuilder {
@@ -49,6 +50,10 @@ impl EngineBuilder {
             runtime.insert(sym.name, sym.value);
         }
 
+        for (name, r#type) in self.types {
+            ctx.declare(&STDLIB, name, r#type);
+        }
+
         ctx.declare(&STDLIB, "String", Type::string());
         ctx.declare(&STDLIB, "Bool", Type::bool());
         ctx.declare(&STDLIB, "Integer", Type::integer());
@@ -64,6 +69,11 @@ impl EngineBuilder {
 
     pub fn add_symbol(mut self, sym: Symbol) -> Self {
         self.symbols.push(sym);
+        self
+    }
+
+    pub fn add_type(mut self, name: impl AsRef<str>, r#type: Type) -> Self {
+        self.types.push((name.as_ref().to_string(), r#type));
         self
     }
 }
