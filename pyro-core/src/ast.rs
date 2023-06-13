@@ -291,6 +291,10 @@ impl Type {
         }
     }
 
+    pub fn record(props: Vec<Prop<Type>>) -> Self {
+        Type::Record(Record { props })
+    }
+
     pub fn channel(r#type: Type) -> Self {
         Type::App(Box::new(Type::channel_type()), Box::new(r#type))
     }

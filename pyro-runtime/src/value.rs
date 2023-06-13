@@ -107,6 +107,28 @@ pub struct Symbol {
 }
 
 impl Symbol {
+    pub fn func<F, A, B>(name: impl AsRef<str>, func: F) -> Self
+    where
+        F: Fn(A) -> B + Send + Sync + 'static,
+        A: PyroLiteral,
+        B: PyroLiteral,
+    {
+        let func = Arc::new(func);
+        let value = RuntimeValue::Fun(Arc::new(move |a| {
+            let a = Arc::new(a);
+            let func_local = func.clone();
+            Box::pin(async move { Ok(func_local(PyroLiteral::try_from_value(a.clone())?).value()) })
+        }));
+
+        let r#type = Type::func(A::r#type(), B::r#type());
+
+        Symbol {
+            name: name.as_ref().to_string(),
+            r#type,
+            value,
+        }
+    }
+
     pub fn func_2<F, A, B, C>(name: impl AsRef<str>, func: F) -> Self
     where
         F: Fn(A, B) -> C + Send + Sync + 'static,

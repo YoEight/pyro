@@ -5,4 +5,4 @@ mod value;
 
 pub use engine::{Engine, EngineBuilder};
 pub use runtime::Runtime;
-pub use value::{Channel, RuntimeValue, Symbol};
+pub use value::{Channel, PyroLiteral, RuntimeValue, Symbol};
