@@ -61,6 +61,11 @@ impl EngineBuilder {
 
         Engine { runtime, ctx }
     }
+
+    pub fn add_symbol(mut self, sym: Symbol) -> Self {
+        self.symbols.push(sym);
+        self
+    }
 }
 
 pub struct Engine {

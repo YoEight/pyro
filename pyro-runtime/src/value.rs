@@ -191,7 +191,7 @@ impl RuntimeValue {
 
     pub fn server(self) -> eyre::Result<Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>> {
         match self.channel()? {
-            Channel::Dual(s, _) | Channel::_Server(s) => Ok(s),
+            Channel::Dual(s, _) | Channel::Server(s) => Ok(s),
             _ => {
                 eyre::bail!("Unexpected runtime exception: typemismatch, expected a server channel")
             }
@@ -206,5 +206,5 @@ pub enum Channel {
         UnboundedSender<RuntimeValue>,
     ),
     Client(UnboundedSender<RuntimeValue>),
-    _Server(Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
+    Server(Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
 }
