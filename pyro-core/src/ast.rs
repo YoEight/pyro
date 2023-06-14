@@ -578,6 +578,10 @@ impl<A> Record<A> {
 
         None
     }
+
+    pub fn is_array(&self) -> bool {
+        self.props.iter().all(|p| p.label.is_none())
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
