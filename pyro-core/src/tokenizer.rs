@@ -90,22 +90,17 @@ impl<'a> Tokenizer<'a> {
         match chars.peek() {
             None => Ok(None),
             Some(ch) => match ch {
-                ' ' | '\t' => {
+                _ if ch.is_ascii_whitespace() => {
                     chars.next();
-                    while let Some(' ' | '\t') = chars.peek() {
+                    while let Some(c) = chars.peek() {
+                        if !c.is_whitespace() {
+                            break;
+                        }
+
                         chars.next();
                     }
 
                     Ok(Some(Sym::Whitespace))
-                }
-
-                '\n' => {
-                    chars.next();
-                    while let Some('\n') = chars.peek() {
-                        chars.next();
-                    }
-
-                    Ok(Some(Sym::Newline))
                 }
 
                 '\'' => {

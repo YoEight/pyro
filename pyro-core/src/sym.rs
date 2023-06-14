@@ -140,8 +140,6 @@ pub enum Sym {
     Keyword(Keyword),
     /// Whitespace (space, tab, etc)
     Whitespace,
-    /// `\n`
-    Newline,
     /// Equality operator `=`
     Eq,
     /// `@`
@@ -162,7 +160,6 @@ impl Display for Sym {
             Sym::Id(i) => i.as_str(),
             Sym::Keyword(k) => k.as_str(),
             Sym::Whitespace => " ",
-            Sym::Newline => "\\n",
             Sym::Eq => "=",
             Sym::At => "@",
             Sym::Underscore => "_",

@@ -78,7 +78,7 @@ impl<'a> ParserState<'a> {
     pub fn skip_spaces(&mut self) {
         loop {
             match self.look_ahead().item() {
-                Sym::Whitespace | Sym::Newline => {
+                Sym::Whitespace => {
                     self.shift();
                 }
 
