@@ -166,6 +166,18 @@ impl Symbol {
             value,
         }
     }
+
+    pub fn client(
+        name: impl AsRef<str>,
+        inner_type: Type,
+        sender: UnboundedSender<RuntimeValue>,
+    ) -> Self {
+        Self {
+            name: name.as_ref().to_string(),
+            r#type: Type::client(inner_type),
+            value: RuntimeValue::Channel(Channel::Client(sender)),
+        }
+    }
 }
 
 pub type Suspension = Arc<
