@@ -229,9 +229,25 @@ async fn execute_output(
             RuntimeValue::Channel(Channel::Client(c) | Channel::Dual(_, c)) => c,
 
             RuntimeValue::Abs(abs) => {
-                let value = interpret(runtime, param.item).await?;
+                match (abs.item.pattern.item, param.item) {
+                    (Pat::Var(pat_var), value) => {
+                        let value = interpret(runtime, value).await?;
+                        runtime.insert(pat_var.var.id, value);
+                    }
 
-                update_scope(runtime, &value, abs.item.pattern.item);
+                    (Pat::Record(pat_rec), Val::Record(param_rec)) => {
+                        for (pat, value) in
+                            pat_rec.props.into_iter().zip(param_rec.props.into_iter())
+                        {
+                            // TODO - implement deeper pattern matching into the record. Needs to be stack-based because interpret is async.
+                            if let Pat::Var(pat_var) = pat.val.item {
+                                let value = interpret(runtime, value.val.item).await?;
+                                runtime.insert(pat_var.var.id, value);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
 
                 return Ok(Some(Suspend {
                     runtime: runtime.clone(),
