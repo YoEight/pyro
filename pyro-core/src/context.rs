@@ -82,6 +82,12 @@ impl Ctx {
         true
     }
 
+    pub fn declare_or_replace<S: Scope>(&mut self, scope: &S, name: impl AsRef<str>, r#type: Type) {
+        let variables = self.variables_new.entry(scope.id()).or_default();
+
+        variables.insert(name.as_ref().to_string(), r#type);
+    }
+
     pub fn update(&mut self, scope: &LocalScope, name: impl AsRef<str>, r#type: Type) {
         for scope_id in scope.ancestors().iter().rev() {
             if let Some(variables) = self.variables_new.get_mut(scope_id) {

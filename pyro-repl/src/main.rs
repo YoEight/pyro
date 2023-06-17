@@ -2,8 +2,9 @@ use clap::{Parser, Subcommand};
 use directories::UserDirs;
 use glyph::{Input, Options};
 use pyro_core::annotate::annotate_decl;
-use pyro_core::ast::Tag;
+use pyro_core::ast::{Decl, Tag, Type};
 use pyro_core::parser::ParserState;
+use pyro_core::sym::Sym;
 use pyro_core::tokenizer::Tokenizer;
 use pyro_core::STDLIB;
 use pyro_runtime::{Engine, EngineBuilder};
@@ -103,18 +104,54 @@ fn add_module(engine: &mut Engine, path: PathBuf) -> eyre::Result<()> {
     let source_code = std::fs::read_to_string(path)?;
     let tokens = Tokenizer::new(source_code.as_str()).tokenize()?;
     let mut parser = ParserState::new(tokens.as_slice());
+    let mut decls = Vec::new();
 
-    parser.skip_spaces();
-    let pos = parser.pos();
-    let decl = parser.parse_decl()?;
-    let ctx = engine.context();
-    let node = Tag {
-        item: decl,
-        tag: pos,
-    };
+    loop {
+        parser.skip_spaces();
+        let pos = parser.pos();
+        let decl = parser.parse_decl()?;
+        let node = Tag {
+            item: decl,
+            tag: pos,
+        };
 
-    let decl = annotate_decl(ctx, &STDLIB.as_local_scope(), node)?;
-    engine.runtime().register(decl.item);
+        let scope = engine.context().new_scope(&STDLIB);
+        let decl = annotate_decl(engine.context(), &scope, node)?;
+        decls.push(decl.item);
+        parser.skip_spaces();
+
+        if parser.look_ahead().item == Sym::EOF {
+            break;
+        }
+    }
+
+    for decl in decls {
+        engine.runtime().register(decl.clone());
+        match decl {
+            Decl::Channels(cs) => {
+                for c in cs {
+                    let (name, r#type) = c.item;
+                    engine
+                        .context()
+                        .declare_or_replace(&STDLIB, name, Type::channel(r#type));
+                }
+            }
+
+            Decl::Def(defs) => {
+                for def in defs {
+                    let r#type = def.tag.r#type;
+                    let def = def.item;
+                    engine
+                        .context()
+                        .declare_or_replace(&STDLIB, def.name, Type::client(r#type));
+                }
+            }
+
+            Decl::Type(name, r#type) => {
+                engine.context().declare_or_replace(&STDLIB, name, r#type);
+            }
+        }
+    }
 
     Ok(())
 }
