@@ -8,6 +8,14 @@ pub trait Scope {
 
 pub struct STDLIB;
 
+impl STDLIB {
+    pub fn as_local_scope(&self) -> LocalScope {
+        LocalScope {
+            ancestors: vec![self.id()],
+        }
+    }
+}
+
 impl Scope for STDLIB {
     fn id(&self) -> u32 {
         0
@@ -33,7 +41,7 @@ impl Scope for LocalScope {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Ctx {
     scope_id: u32,
     variables_new: HashMap<u32, HashMap<String, Type>>,

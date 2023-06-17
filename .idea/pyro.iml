@@ -5,6 +5,7 @@
       <sourceFolder url="file://$MODULE_DIR$/pyro-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/pyro/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/pyro-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/pyro-repl/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
     <orderEntry type="inheritedJdk" />

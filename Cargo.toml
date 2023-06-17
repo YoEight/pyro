@@ -2,5 +2,6 @@
 members = [
     "pyro-core",
     "pyro-runtime",
+    "pyro-repl",
     "pyro",
 ]

@@ -542,7 +542,7 @@ impl<'a> ParserState<'a> {
         ))
     }
 
-    fn parse_decl(&mut self) -> Result<Decl<Pos>> {
+    pub fn parse_decl(&mut self) -> Result<Decl<Pos>> {
         let token = self.look_ahead();
 
         match token.item() {

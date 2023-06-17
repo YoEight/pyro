@@ -3,7 +3,6 @@ use crate::runtime::Runtime;
 use crate::value::{Channel, RuntimeValue, Symbol};
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Type, Val};
-use pyro_core::sym::Literal;
 use pyro_core::{Ctx, STDLIB};
 use tokio::sync::mpsc;
 
@@ -17,7 +16,7 @@ enum Msg {
     Completed(u64),
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct EngineBuilder {
     symbols: Vec<Symbol>,
     types: Vec<(String, Type)>,
@@ -36,14 +35,28 @@ impl EngineBuilder {
         let mut ctx = Ctx::default();
         self.symbols.push(Symbol {
             name: "print".to_string(),
-            r#type: Type::client(Type::generic_with_constraints("a", vec![Type::show()])),
+            r#type: Type::client(Type::generic("a")),
             value: RuntimeValue::Channel(Channel::Client(stdout)),
         });
 
         self.symbols
-            .push(Symbol::func_2("+", |a: u64, b: u64| a + b));
+            .push(Symbol::func_2("+", |a: i64, b: i64| a + b));
         self.symbols
-            .push(Symbol::func_2("<=", |a: u64, b: u64| a <= b));
+            .push(Symbol::func_2("-", |a: i64, b: i64| a - b));
+        self.symbols
+            .push(Symbol::func_2("*", |a: i64, b: i64| a * b));
+        self.symbols
+            .push(Symbol::func_2("<=", |a: i64, b: i64| a <= b));
+        self.symbols
+            .push(Symbol::func_2("<", |a: i64, b: i64| a < b));
+        self.symbols
+            .push(Symbol::func_2(">=", |a: i64, b: i64| a >= b));
+        self.symbols
+            .push(Symbol::func_2(">", |a: i64, b: i64| a > b));
+        self.symbols
+            .push(Symbol::func_2("==", |a: i64, b: i64| a == b));
+        self.symbols.push(Symbol::func_2("&&", |a, b| a && b));
+        self.symbols.push(Symbol::func_2("||", |a, b| a || b));
 
         for sym in self.symbols {
             ctx.declare(&STDLIB, &sym.name, sym.r#type);
@@ -78,6 +91,7 @@ impl EngineBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct Engine {
     runtime: Runtime,
     ctx: Ctx,
@@ -86,6 +100,14 @@ pub struct Engine {
 impl Engine {
     pub fn builder() -> EngineBuilder {
         EngineBuilder::default()
+    }
+
+    pub fn context(&mut self) -> &mut Ctx {
+        &mut self.ctx
+    }
+
+    pub fn runtime(&mut self) -> &mut Runtime {
+        &mut self.runtime
     }
 
     pub async fn run(self, source_code: &str) -> eyre::Result<()> {
@@ -153,14 +175,7 @@ impl Engine {
 fn spawn_stdout_process(mut input: mpsc::UnboundedReceiver<RuntimeValue>) {
     tokio::spawn(async move {
         while let Some(value) = input.recv().await {
-            if let RuntimeValue::Literal(lit) = value {
-                match lit {
-                    Literal::Integer(n) => println!("{}", n),
-                    Literal::String(s) => println!("{}", s),
-                    Literal::Char(c) => println!("'{}'", c),
-                    Literal::Bool(b) => println!("{}", b),
-                }
-            }
+            println!("{}", value);
         }
     });
 }

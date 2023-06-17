@@ -40,7 +40,7 @@ impl Display for Keyword {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     /// An unsigned numeric literal
-    Integer(u64),
+    Integer(i64),
     /// Double quoted string: i.e: "string"
     String(String),
     Char(char),

@@ -336,7 +336,7 @@ impl Type {
 
     pub fn integer() -> Self {
         Type::Name {
-            parent: vec![Type::show()],
+            parent: vec![],
             name: "Integer".to_string(),
             kind: 0,
             generic: false,
@@ -345,7 +345,7 @@ impl Type {
 
     pub fn string() -> Self {
         Type::Name {
-            parent: vec![Type::show()],
+            parent: vec![],
             name: "String".to_string(),
             kind: 0,
             generic: false,
@@ -354,7 +354,7 @@ impl Type {
 
     pub fn char() -> Self {
         Type::Name {
-            parent: vec![Type::show()],
+            parent: vec![],
             name: "Char".to_string(),
             kind: 0,
             generic: false,
@@ -363,7 +363,7 @@ impl Type {
 
     pub fn bool() -> Self {
         Type::Name {
-            parent: vec![Type::show()],
+            parent: vec![],
             name: "Bool".to_string(),
             kind: 0,
             generic: false,
@@ -374,15 +374,6 @@ impl Type {
         Type::Name {
             parent: vec![],
             name: "Process".to_string(),
-            kind: 0,
-            generic: false,
-        }
-    }
-
-    pub fn show() -> Self {
-        Type::Name {
-            parent: vec![],
-            name: "Show".to_string(),
             kind: 0,
             generic: false,
         }

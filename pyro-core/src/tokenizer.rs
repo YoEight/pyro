@@ -288,7 +288,7 @@ impl<'a> Tokenizer<'a> {
                         chars.next();
                     }
 
-                    let num = match num.parse::<u64>() {
+                    let num = match num.parse::<i64>() {
                         Ok(num) => num,
                         Err(e) => {
                             return Err(Error {

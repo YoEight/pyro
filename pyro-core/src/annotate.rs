@@ -368,7 +368,7 @@ fn update_pat_var_type_info(ctx: &mut Ctx, scope: &LocalScope, pat_var: &mut Pat
     pat_var.var.r#type = r#type.clone();
 }
 
-fn annotate_decl(
+pub fn annotate_decl(
     ctx: &mut Ctx,
     scope: &LocalScope,
     decl: Tag<Decl<Pos>, Pos>,

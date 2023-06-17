@@ -2,6 +2,7 @@ use futures::future::BoxFuture;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Record, Tag, Type};
 use pyro_core::sym::Literal;
+use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, Mutex};
@@ -16,7 +17,7 @@ pub trait PyroLiteral {
     fn value(self) -> RuntimeValue;
 }
 
-impl PyroLiteral for u64 {
+impl PyroLiteral for i64 {
     fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
@@ -100,6 +101,7 @@ impl PyroLiteral for bool {
     }
 }
 
+#[derive(Clone)]
 pub struct Symbol {
     pub name: String,
     pub r#type: Type,
@@ -193,6 +195,18 @@ pub enum RuntimeValue {
     Fun(Suspension),
 }
 
+impl Display for RuntimeValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RuntimeValue::Channel(c) => write!(f, "{}", c),
+            RuntimeValue::Literal(l) => write!(f, "{}", l),
+            RuntimeValue::Record(r) => write!(f, "{}", r),
+            RuntimeValue::Abs(_) => write!(f, "<anonymous_client>"),
+            RuntimeValue::Fun(_) => write!(f, "<function>"),
+        }
+    }
+}
+
 impl RuntimeValue {
     pub fn string(value: impl AsRef<str>) -> Self {
         RuntimeValue::Literal(Literal::String(value.as_ref().to_string()))
@@ -240,5 +254,15 @@ pub enum Channel {
         UnboundedSender<RuntimeValue>,
     ),
     Client(UnboundedSender<RuntimeValue>),
-    Server(Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>),
+    Server(Arc<Mutex<UnboundedReceiver<RuntimeValue>>>),
+}
+
+impl Display for Channel {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Channel::Dual(_, _) => write!(f, "<channel>"),
+            Channel::Client(_) => write!(f, "<client>"),
+            Channel::Server(_) => write!(f, "<server>"),
+        }
+    }
 }
