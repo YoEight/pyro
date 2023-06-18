@@ -579,6 +579,17 @@ where
 }
 
 impl<A> Prop<A> {
+    pub fn new(label: Option<impl AsRef<str>>, val: A) -> Self {
+        Prop {
+            label: label.map(|s| s.as_ref().to_string()),
+            val,
+        }
+    }
+
+    pub fn ano(val: A) -> Self {
+        Self::new(None::<String>, val)
+    }
+
     pub fn map<F, B>(self, fun: F) -> Prop<B>
     where
         F: FnOnce(A) -> B,

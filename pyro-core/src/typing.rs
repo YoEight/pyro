@@ -1,4 +1,4 @@
-use crate::ast::Record;
+use crate::ast::{Prop, Record};
 use crate::context::{LocalScope, Scope};
 use crate::utils::generate_generic_type_name;
 use crate::{Ctx, STDLIB};
@@ -83,6 +83,12 @@ impl Type {
 
     pub fn bool() -> Self {
         Type::named("Bool")
+    }
+
+    pub fn record(props: Vec<Prop<Type>>) -> Self {
+        Type::Rec {
+            props: Record { props },
+        }
     }
 
     pub fn is_generic(&self) -> bool {
@@ -254,6 +260,14 @@ impl Knowledge {
         Some(self.dict_mut(&type_ref))
     }
 
+    pub fn type_ref<S: Scope>(&self, scope: &S, r#type: &Type) -> Option<TypeRef> {
+        if let Type::Var { name } = r#type {
+            return self.look_up(scope, name);
+        }
+
+        None
+    }
+
     pub fn new_generic<S: Scope>(&mut self, scope: &S) -> TypeRef {
         let types = self.inner.entry(scope.id()).or_default();
         let id = types.name_gen;
@@ -331,14 +345,28 @@ impl Knowledge {
                 lhs: require_lhs,
                 rhs: require_rhs,
             } => {
-                let provided_dict = self.dict(provided);
+                let provided_type = { self.dict(provided).r#type.clone() };
 
                 if let Type::Fun {
                     lhs: provided_lhs,
                     rhs: provided_rhs,
-                } = &provided_dict.r#type
+                } = &provided_type
                 {
-                    todo!()
+                    let param_matches =
+                        if let Some(provided) = self.type_ref(scope, provided_lhs.as_ref()) {
+                            self.param_matches(scope, require_lhs.as_ref(), &provided)
+                        } else {
+                            require_lhs == provided_lhs
+                        };
+
+                    let result_matches =
+                        if let Some(provided) = self.type_ref(scope, provided_rhs.as_ref()) {
+                            self.param_matches(scope, require_rhs.as_ref(), &provided)
+                        } else {
+                            require_rhs == provided_rhs
+                        };
+
+                    return param_matches && result_matches;
                 }
 
                 false
@@ -348,25 +376,39 @@ impl Knowledge {
                 lhs: require_lhs,
                 rhs: require_rhs,
             } => {
-                let provided_dict = self.dict(provided);
+                let provided_type = { self.dict(provided).r#type.clone() };
 
                 if let Type::App {
                     lhs: provided_lhs,
                     rhs: provided_rhs,
-                } = &provided_dict.r#type
+                } = &provided_type
                 {
-                    todo!()
+                    let constr_matches =
+                        if let Some(provided) = self.type_ref(scope, provided_lhs.as_ref()) {
+                            self.param_matches(scope, require_lhs.as_ref(), &provided)
+                        } else {
+                            require_lhs == provided_lhs
+                        };
+
+                    let inner_matches =
+                        if let Some(provided) = self.type_ref(scope, provided_rhs.as_ref()) {
+                            self.param_matches(scope, require_rhs.as_ref(), &provided)
+                        } else {
+                            require_rhs == provided_rhs
+                        };
+
+                    return constr_matches && inner_matches;
                 }
 
                 false
             }
 
             Type::Rec { props: require_rec } => {
-                let provided_dict = self.dict(provided);
+                let provided_type = { self.dict(provided).r#type.clone() };
 
                 if let Type::Rec {
                     props: provided_rec,
-                } = &provided_dict.r#type
+                } = &provided_type
                 {
                     if require_rec.props.len() != provided_rec.props.len() {
                         return false;
@@ -379,7 +421,16 @@ impl Knowledge {
                             return false;
                         }
 
-                        todo!()
+                        let matches =
+                            if let Some(provided) = self.type_ref(scope, &provided_prop.val) {
+                                self.param_matches(scope, &require_prop.val, &provided)
+                            } else {
+                                require_prop.val == provided_prop.val
+                            };
+
+                        if !matches {
+                            return false;
+                        }
                     }
 
                     return true;
@@ -460,6 +511,36 @@ fn test_type_check_generic() {
 
     let target = know.declare(&scope, "foo", target_dict);
     let param = know.declare(&scope, "bar", integer_dict);
+
+    assert!(know.type_check_send(&scope, &target, &param));
+}
+
+#[test]
+fn test_type_check_generic_complex() {
+    let mut know = Knowledge::standard();
+    let scope = know.new_scope(&STDLIB);
+    let client_ref = know.look_up(&scope, "Client").unwrap();
+    let client_dict = know.dict(&client_ref);
+    let target_type = Type::app(
+        client_dict.r#type.clone(),
+        Type::record(vec![Prop::ano(Type::ForAll {
+            binders: vec!["a".to_string()],
+            body: Box::new(Type::Qual {
+                ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
+                body: Box::new(Type::named("a")),
+            }),
+        })]),
+    );
+
+    let mut target_dict = client_dict.clone();
+    target_dict.r#type = target_type;
+
+    let integer = know.look_up(&scope, "Integer").unwrap();
+    let integer_dict = know.dict(&integer).clone();
+    let param_dict = Dict::new(Type::record(vec![Prop::ano(integer_dict.r#type)]));
+
+    let target = know.declare(&scope, "foo", target_dict);
+    let param = know.declare(&scope, "bar", param_dict);
 
     assert!(know.type_check_send(&scope, &target, &param));
 }
