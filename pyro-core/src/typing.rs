@@ -327,9 +327,66 @@ impl Knowledge {
                 self.param_matches(scope, body.as_ref(), provided)
             }
 
-            Type::Fun { .. } => todo!(),
-            Type::App { .. } => todo!(),
-            Type::Rec { .. } => todo!(),
+            Type::Fun {
+                lhs: require_lhs,
+                rhs: require_rhs,
+            } => {
+                let provided_dict = self.dict(provided);
+
+                if let Type::Fun {
+                    lhs: provided_lhs,
+                    rhs: provided_rhs,
+                } = &provided_dict.r#type
+                {
+                    todo!()
+                }
+
+                false
+            }
+
+            Type::App {
+                lhs: require_lhs,
+                rhs: require_rhs,
+            } => {
+                let provided_dict = self.dict(provided);
+
+                if let Type::App {
+                    lhs: provided_lhs,
+                    rhs: provided_rhs,
+                } = &provided_dict.r#type
+                {
+                    todo!()
+                }
+
+                false
+            }
+
+            Type::Rec { props: require_rec } => {
+                let provided_dict = self.dict(provided);
+
+                if let Type::Rec {
+                    props: provided_rec,
+                } = &provided_dict.r#type
+                {
+                    if require_rec.props.len() != provided_rec.props.len() {
+                        return false;
+                    }
+
+                    for (require_prop, provided_prop) in
+                        require_rec.props.iter().zip(provided_rec.props.iter())
+                    {
+                        if require_prop.label != provided_prop.label {
+                            return false;
+                        }
+
+                        todo!()
+                    }
+
+                    return true;
+                }
+
+                false
+            }
         }
     }
 
