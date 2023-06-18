@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use directories::UserDirs;
 use glyph::{Input, Options};
-use pyro_core::annotate::annotate_decl;
+use pyro_core::annotate::{annotate_decl, annotate_val, ValCtx};
 use pyro_core::ast::{Decl, Tag, Type};
 use pyro_core::parser::ParserState;
 use pyro_core::sym::Sym;
@@ -21,6 +21,9 @@ struct Shell {
 enum Cmd {
     /// Add a pyro module to the scope.
     AddModule { file: PathBuf },
+
+    /// Give the type of an expression.
+    Type { expr: String },
 
     /// Exit the application.
     Exit,
@@ -65,6 +68,13 @@ async fn main() -> eyre::Result<()> {
                                 println!("ERR: {}", e);
                             }
                         }
+
+                        Cmd::Type { expr } => {
+                            if let Err(e) = type_expr(&mut engine, expr) {
+                                println!("Err: {}", e);
+                            }
+                        }
+
                         Cmd::Exit => {
                             break;
                         }
@@ -154,4 +164,24 @@ fn add_module(engine: &mut Engine, path: PathBuf) -> eyre::Result<()> {
     }
 
     Ok(())
+}
+
+fn type_expr(engine: &mut Engine, expr: String) -> eyre::Result<()> {
+    let tokens = Tokenizer::new(expr.as_str()).tokenize()?;
+    let mut parser = ParserState::new(tokens.as_slice());
+    let value = parser.parse_value()?;
+    let scope = engine.context().new_scope(&STDLIB);
+    let value = annotate_val(engine.context(), &scope, ValCtx::Regular, value)?;
+
+    println!(">>> {}", value.tag.r#type);
+
+    Ok(())
+}
+
+fn show_type(r#type: &Type) -> String {
+    match r#type {
+        Type::Name { name, .. } => name.to_string(),
+        Type::Record(rec) => rec.to_string(),
+        Type::App(_, _) => todo!(),
+    }
 }

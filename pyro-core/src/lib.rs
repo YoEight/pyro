@@ -9,6 +9,8 @@ mod context;
 pub mod parser;
 pub mod sym;
 pub mod tokenizer;
+mod typing;
+mod utils;
 
 pub use context::{Ctx, STDLIB};
 

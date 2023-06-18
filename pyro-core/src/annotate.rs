@@ -10,7 +10,7 @@ use crate::sym::Literal;
 use crate::{Ctx, Error, Pos, Result};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-enum ValCtx {
+pub enum ValCtx {
     Input,
     Output,
     Regular,
@@ -570,7 +570,7 @@ fn annotate_pat_var(
     })
 }
 
-fn annotate_val(
+pub fn annotate_val(
     ctx: &mut Ctx,
     scope: &LocalScope,
     val_ctx: ValCtx,

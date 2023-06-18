@@ -1,12 +1,10 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{
-    generate_generic_type_name, Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag,
-    Type, Val, Var,
-};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
 use crate::sym::{Keyword, Punctuation, Sym};
 use crate::tokenizer::Token;
+use crate::utils::generate_generic_type_name;
 use crate::{Error, Pos, Result};
 use std::iter::Peekable;
 use std::slice::Iter;
