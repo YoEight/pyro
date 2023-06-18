@@ -28,7 +28,7 @@ impl Scope for STDLIB {
 
 #[derive(Default, Clone)]
 pub struct LocalScope {
-    ancestors: Vec<u32>,
+    pub ancestors: Vec<u32>,
 }
 
 impl Scope for LocalScope {

@@ -1,7 +1,7 @@
 use crate::ast::Record;
-use crate::context::Scope;
+use crate::context::{LocalScope, Scope};
 use crate::utils::generate_generic_type_name;
-use crate::STDLIB;
+use crate::{Ctx, STDLIB};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
@@ -132,6 +132,7 @@ impl ScopedTypes {
 
 #[derive(Clone, Default)]
 pub struct Knowledge {
+    scope_gen: u32,
     inner: HashMap<u32, ScopedTypes>,
 }
 
@@ -158,6 +159,24 @@ impl Knowledge {
         types.insert(
             "Char",
             Dict::with_impls(Type::char(), vec!["Show".to_string()]),
+        );
+
+        types.insert(
+            "Client",
+            Dict::with_impls(Type::named("Client"), vec!["Send".to_string()]),
+        );
+
+        types.insert(
+            "Server",
+            Dict::with_impls(Type::named("Server"), vec!["Receive".to_string()]),
+        );
+
+        types.insert(
+            "Channel",
+            Dict::with_impls(
+                Type::named("Channel"),
+                vec!["Send".to_string(), "Receive".to_string()],
+            ),
         );
 
         this
@@ -194,12 +213,18 @@ impl Knowledge {
     }
 
     pub fn look_up<S: Scope>(&self, scope: &S, name: &str) -> Option<TypeRef> {
-        self.inner.get(&scope.id())?.types.get(name)?;
+        for scope_id in scope.ancestors().iter().rev() {
+            if let Some(types) = self.inner.get(&scope_id) {
+                if types.types.contains_key(name) {
+                    return Some(TypeRef {
+                        scope: *scope_id,
+                        name: name.to_string(),
+                    });
+                }
+            }
+        }
 
-        Some(TypeRef {
-            scope: scope.id(),
-            name: name.to_string(),
-        })
+        None
     }
 
     pub fn new_generic<S: Scope>(&mut self, scope: &S) -> TypeRef {
@@ -215,4 +240,49 @@ impl Knowledge {
             name,
         }
     }
+
+    pub fn new_scope<S: Scope>(&mut self, parent: &S) -> LocalScope {
+        self.scope_gen += 1;
+        let id = self.scope_gen;
+        let mut ancestors = parent.ancestors().to_vec();
+
+        ancestors.push(id);
+
+        LocalScope { ancestors }
+    }
+}
+
+fn type_check_send(knowledge: &Knowledge, target: &TypeRef, params: &TypeRef) -> bool {
+    let target_dict = knowledge.dict(target);
+
+    if !target_dict.implements("Send") {
+        return false;
+    }
+
+    let inner_type = if let Type::App { rhs, .. } = target_dict {
+        rhs.as_ref()
+    } else {
+        unreachable!()
+    };
+
+    let params_dict = knowledge.dict(params);
+
+    true
+}
+
+#[test]
+fn test_type_check_client_easy() {
+    let mut know = Knowledge::standard();
+    let scope = know.new_scope(&STDLIB);
+    let foo_type = Type::client(Type::integer());
+    let client = know.look_up(&scope, "Client").unwrap();
+    let integer = know.look_up(&scope, "Integer").unwrap();
+    let mut foo_dict = know.dict(&client).clone();
+    let integer_dict = know.dict(&integer).clone();
+    foo_dict.r#type = foo_type;
+
+    let foo = know.declare(&scope, "foo", foo_dict);
+    let bar = know.declare(&scope, "bar", integer_dict);
+
+    assert!(type_check_send(&know, &foo, &bar));
 }
