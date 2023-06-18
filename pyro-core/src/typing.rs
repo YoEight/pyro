@@ -4,7 +4,7 @@ use crate::utils::generate_generic_type_name;
 use crate::{Ctx, STDLIB};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum Type {
     /// Universally quantified type.
     ForAll {
@@ -34,6 +34,13 @@ impl Type {
         Type::Fun {
             lhs: Box::new(param),
             rhs: Box::new(result),
+        }
+    }
+
+    pub fn app(constr: Type, inner: Type) -> Self {
+        Type::App {
+            lhs: Box::new(constr),
+            rhs: Box::new(inner),
         }
     }
 
@@ -76,6 +83,14 @@ impl Type {
 
     pub fn bool() -> Self {
         Type::named("Bool")
+    }
+
+    pub fn is_generic(&self) -> bool {
+        if let Type::Var { name } = self {
+            return name.chars().nth(0).unwrap().is_ascii_lowercase();
+        }
+
+        false
     }
 }
 
@@ -227,6 +242,18 @@ impl Knowledge {
         None
     }
 
+    pub fn look_up_dict<S: Scope>(&self, scope: &S, name: &str) -> Option<&Dict> {
+        let type_ref = self.look_up(scope, name)?;
+
+        Some(self.dict(&type_ref))
+    }
+
+    pub fn look_up_dict_mut<S: Scope>(&mut self, scope: &S, name: &str) -> Option<&mut Dict> {
+        let type_ref = self.look_up(scope, name)?;
+
+        Some(self.dict_mut(&type_ref))
+    }
+
     pub fn new_generic<S: Scope>(&mut self, scope: &S) -> TypeRef {
         let types = self.inner.entry(scope.id()).or_default();
         let id = types.name_gen;
@@ -250,24 +277,88 @@ impl Knowledge {
 
         LocalScope { ancestors }
     }
-}
 
-fn type_check_send(knowledge: &Knowledge, target: &TypeRef, params: &TypeRef) -> bool {
-    let target_dict = knowledge.dict(target);
+    pub fn param_matches<S: Scope>(
+        &mut self,
+        scope: &S,
+        require: &Type,
+        provided: &TypeRef,
+    ) -> bool {
+        match require {
+            Type::Var { name } => {
+                let provided_dict = self.dict(provided);
+                let require_dict = self
+                    .look_up_dict(scope, name)
+                    .expect("Must be defined at that level");
 
-    if !target_dict.implements("Send") {
-        return false;
+                if is_generic_name(name) {
+                    require_dict.impls.is_subset(&provided_dict.impls)
+                } else {
+                    require_dict.r#type == provided_dict.r#type
+                }
+            }
+
+            Type::ForAll { binders, body } => {
+                let new_scope = self.new_scope(scope);
+                for binder in binders {
+                    self.declare(&new_scope, binder, Dict::new(Type::named(binder)));
+                }
+
+                self.param_matches(&new_scope, body.as_ref(), provided)
+            }
+
+            Type::Qual { ctx, body } => {
+                for constraint in ctx {
+                    if let Type::App { lhs, rhs } = constraint {
+                        match (lhs.as_ref(), rhs.as_ref()) {
+                            (Type::Var { name: constr_name }, Type::Var { name: var_name }) => {
+                                let var_dict = self
+                                    .look_up_dict_mut(scope, var_name)
+                                    .expect("Must be defined at that level");
+
+                                var_dict.add(constr_name);
+                            }
+
+                            _ => unreachable!(),
+                        }
+                    }
+                }
+
+                self.param_matches(scope, body.as_ref(), provided)
+            }
+
+            Type::Fun { .. } => todo!(),
+            Type::App { .. } => todo!(),
+            Type::Rec { .. } => todo!(),
+        }
     }
 
-    let inner_type = if let Type::App { rhs, .. } = target_dict {
-        rhs.as_ref()
-    } else {
-        unreachable!()
-    };
+    pub fn type_check_send<S: Scope>(
+        &mut self,
+        scope: &S,
+        target: &TypeRef,
+        params: &TypeRef,
+    ) -> bool {
+        let inner_type = {
+            let target_dict = self.dict(target);
 
-    let params_dict = knowledge.dict(params);
+            if !target_dict.implements("Send") {
+                return false;
+            }
 
-    true
+            if let Type::App { rhs, .. } = &target_dict.r#type {
+                rhs.clone()
+            } else {
+                unreachable!()
+            }
+        };
+
+        self.param_matches(scope, &inner_type, &params)
+    }
+}
+
+fn is_generic_name(name: &str) -> bool {
+    name.chars().nth(0).unwrap().is_lowercase()
 }
 
 #[test]
@@ -276,13 +367,42 @@ fn test_type_check_client_easy() {
     let scope = know.new_scope(&STDLIB);
     let foo_type = Type::client(Type::integer());
     let client = know.look_up(&scope, "Client").unwrap();
-    let integer = know.look_up(&scope, "Integer").unwrap();
+    let param = know.look_up(&scope, "Integer").unwrap();
     let mut foo_dict = know.dict(&client).clone();
-    let integer_dict = know.dict(&integer).clone();
+    let param_dict = know.dict(&param).clone();
     foo_dict.r#type = foo_type;
 
     let foo = know.declare(&scope, "foo", foo_dict);
-    let bar = know.declare(&scope, "bar", integer_dict);
+    let bar = know.declare(&scope, "bar", param_dict);
 
-    assert!(type_check_send(&know, &foo, &bar));
+    assert!(know.type_check_send(&scope, &foo, &bar));
+}
+
+#[test]
+fn test_type_check_generic() {
+    let mut know = Knowledge::standard();
+    let scope = know.new_scope(&STDLIB);
+    let client_ref = know.look_up(&scope, "Client").unwrap();
+    let client_dict = know.dict(&client_ref);
+    let target_type = Type::app(
+        client_dict.r#type.clone(),
+        Type::ForAll {
+            binders: vec!["a".to_string()],
+            body: Box::new(Type::Qual {
+                ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
+                body: Box::new(Type::named("a")),
+            }),
+        },
+    );
+
+    let mut target_dict = client_dict.clone();
+    target_dict.r#type = target_type;
+
+    let integer = know.look_up(&scope, "Integer").unwrap();
+    let integer_dict = know.dict(&integer).clone();
+
+    let target = know.declare(&scope, "foo", target_dict);
+    let param = know.declare(&scope, "bar", integer_dict);
+
+    assert!(know.type_check_send(&scope, &target, &param));
 }
