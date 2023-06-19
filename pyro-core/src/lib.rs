@@ -6,6 +6,7 @@ use tokenizer::{Token, Tokenizer};
 pub mod annotate;
 pub mod ast;
 mod context;
+mod infer;
 pub mod parser;
 pub mod sym;
 pub mod tokenizer;

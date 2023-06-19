@@ -3,6 +3,7 @@ use crate::context::{LocalScope, Scope};
 use crate::utils::generate_generic_type_name;
 use crate::{Ctx, STDLIB};
 use std::collections::{HashMap, HashSet};
+use std::fmt::{write, Display, Formatter};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Type {
@@ -21,6 +22,53 @@ pub enum Type {
     App { lhs: Box<Type>, rhs: Box<Type> },
     /// Record
     Rec { props: Record<Type> },
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::ForAll { binders, body } => {
+                write!(f, "forall ")?;
+                for bind in binders {
+                    write!(f, "{} ", bind)?;
+                }
+
+                write!(f, ". ")?;
+                body.fmt(f)
+            }
+
+            Type::Qual { ctx, body } => {
+                write!(f, "(")?;
+                for (idx, constr) in ctx.iter().enumerate() {
+                    if idx != 0 {
+                        write!(f, ", ")?;
+                    }
+
+                    constr.fmt(f)?;
+                }
+                write!(f, ") => ")?;
+                body.fmt(f)
+            }
+
+            Type::Var { name } => write!(f, "{}", name),
+
+            Type::Fun { lhs, rhs } => {
+                lhs.fmt(f)?;
+                write!(f, " -> ")?;
+                rhs.fmt(f)
+            }
+
+            Type::App { lhs, rhs } => {
+                write!(f, "(")?;
+                lhs.fmt(f)?;
+                write!(f, " ")?;
+                rhs.fmt(f)?;
+                write!(f, ")")
+            }
+
+            Type::Rec { props } => write!(f, "{}", props),
+        }
+    }
 }
 
 impl Type {
@@ -142,6 +190,7 @@ pub struct TypeRef {
 #[derive(Clone, Default)]
 struct ScopedTypes {
     name_gen: usize,
+    ano_gen: usize,
     types: HashMap<String, Dict>,
 }
 
@@ -203,6 +252,34 @@ impl Knowledge {
         this
     }
 
+    pub fn process_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "Process").unwrap()
+    }
+
+    pub fn client_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "Client").unwrap()
+    }
+
+    pub fn channel_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "Channel").unwrap()
+    }
+
+    pub fn integer_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "Integer").unwrap()
+    }
+
+    pub fn string_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "String").unwrap()
+    }
+
+    pub fn bool_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "Bool").unwrap()
+    }
+
+    pub fn char_type_ref(&self) -> TypeRef {
+        self.look_up(&STDLIB, "Char").unwrap()
+    }
+
     pub fn declare<S: Scope>(&mut self, scope: &S, name: impl AsRef<str>, dict: Dict) -> TypeRef {
         let types = self.inner.entry(scope.id()).or_default();
         let type_ref = TypeRef {
@@ -211,6 +288,19 @@ impl Knowledge {
         };
 
         types.insert(name.as_ref().to_string(), dict);
+
+        type_ref
+    }
+
+    pub fn declare_ano<S: Scope>(&mut self, scope: &S, dict: Dict) -> TypeRef {
+        let types = self.inner.entry(scope.id()).or_default();
+        let name = format!("@ano_{}", types.ano_gen);
+        let type_ref = TypeRef {
+            scope: scope.id(),
+            name: name.clone(),
+        };
+
+        types.insert(name, dict);
 
         type_ref
     }
@@ -451,6 +541,29 @@ impl Knowledge {
             let target_dict = self.dict(target);
 
             if !target_dict.implements("Send") {
+                return false;
+            }
+
+            if let Type::App { rhs, .. } = &target_dict.r#type {
+                rhs.clone()
+            } else {
+                unreachable!()
+            }
+        };
+
+        self.param_matches(scope, &inner_type, &params)
+    }
+
+    pub fn type_check_receive<S: Scope>(
+        &mut self,
+        scope: &S,
+        target: &TypeRef,
+        params: &TypeRef,
+    ) -> bool {
+        let inner_type = {
+            let target_dict = self.dict(target);
+
+            if !target_dict.implements("Receive") {
                 return false;
             }
 
