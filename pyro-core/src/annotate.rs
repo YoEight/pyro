@@ -8,7 +8,7 @@ use crate::ast::{Proc, Program, Tag, Val};
 use crate::context::{LocalScope, STDLIB};
 use crate::sym::Literal;
 use crate::typing::{Knowledge, Type, TypeInfo};
-use crate::{record_label_not_found, type_error, Ctx, Error, Pos, Result};
+use crate::{not_implement, record_label_not_found, type_error, Ctx, Error, Pos, Result};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum ValCtx {
@@ -47,78 +47,20 @@ pub fn annotate_program(mut ctx: Knowledge, prog: Program<TypeInfo>) -> Result<P
 fn annotate_proc(
     ctx: &mut Knowledge,
     proc: Tag<Proc<TypeInfo>, TypeInfo>,
-) -> Result<Tag<Proc<Ann>, Ann>> {
+) -> eyre::Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
             let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
             let mut l = annotate_val(ctx, l)?;
             let mut r = annotate_val(ctx, r)?;
 
-            if l.tag.r#type.is_generic() {
-                if !l.tag.r#type.meets_requirement(&Type::client_type()) {
-                    l.tag.r#type.add_constraint(Type::client_type());
-                    l.tag.r#type = Type::kind_constr(l.tag.r#type, Type::generic("a"));
-                }
-            } else if !l.tag.r#type.meets_requirement(&Type::client_type()) {
-                return Err(Error {
-                    pos: r.tag.pos,
-                    message: format!("Type '{}' doesn't inherits 'Client'", l.tag.r#type),
-                });
+            if !ctx.implements(&proc.tag.scope, &l.tag.r#type, "Send") {
+                return not_implement(proc.tag.pos, &l.tag.r#type, "Send");
             }
 
-            if r.tag.r#type.is_generic() {
-                let inner_type = l.tag.r#type.inner_type_mut();
-
-                if inner_type.is_generic() {
-                    let constraints = r.tag.r#type.constraints();
-                    inner_type.add_constraints(constraints);
-                    r.tag.r#type = inner_type.clone();
-                    update_val_type_info(ctx, &scope, &mut r, inner_type.clone());
-                } else {
-                    let constraints = r.tag.r#type.constraints();
-                    if inner_type.meets_requirements(&constraints) {
-                        r.tag.r#type = inner_type.clone();
-                        update_val_type_info(ctx, &scope, &mut r, inner_type.clone());
-                    } else {
-                        return Err(Error {
-                            pos: r.tag.pos,
-                            message: format!(
-                                "Type '{}' doesn't inherits from {:?}",
-                                inner_type, constraints,
-                            ),
-                        });
-                    }
-                }
-            } else if l.tag.r#type.inner_type().is_generic() {
-                let constraints = l.tag.r#type.inner_type().constraints();
-
-                if !r.tag.r#type.meets_requirements(&constraints) {
-                    return Err(Error {
-                        pos: l.tag.pos,
-                        message: format!(
-                            "Type '{}' doesn't inherits from {:?}",
-                            l.tag.r#type.inner_type(),
-                            constraints,
-                        ),
-                    });
-                }
-
-                *l.tag.r#type.inner_type_mut() = r.tag.r#type.clone();
-                let l_type = l.tag.r#type.clone();
-                update_val_type_info(ctx, &scope, &mut l, l_type);
-            } else if !l.tag.r#type.typecheck_client_call(&r.tag.r#type) {
-                return Err(Error {
-                    pos: r.tag.pos,
-                    message: format!(
-                        "Expected type '{}' but got '{}' instead",
-                        l.tag.r#type.inner_type(),
-                        r.tag.r#type
-                    ),
-                });
+            if !ctx.param_matches(&proc.tag.scope, l.tag.r#type.inner(), &r.tag.r#type) {
+                return type_error(proc.tag.pos, l.tag.r#type.inner(), &r.tag.r#type);
             }
-
-            ann.used.extend(l.tag.used.clone());
-            ann.used.extend(r.tag.used.clone());
 
             Ok(Tag {
                 tag: ann,
@@ -127,73 +69,17 @@ fn annotate_proc(
         }
 
         Proc::Input(l, r) => {
-            let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let mut l = annotate_val(ctx, &scope, ValCtx::Input, l)?;
-            let (pat_type, r) = annotate_abs(ctx, &scope, r, None)?;
+            let ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let l = annotate_val(ctx, l)?;
+            let r = annotate_abs(ctx, r)?;
 
-            if l.tag.r#type.is_generic() {
-                if !l.tag.r#type.meets_requirement(&Type::server_type()) {
-                    l.tag.r#type.add_constraint(Type::server_type());
-                    l.tag.r#type = Type::kind_constr(l.tag.r#type, Type::generic("a"));
-                }
-            } else if !l.tag.r#type.meets_requirement(&Type::server_type()) {
-                return Err(Error {
-                    pos: r.tag.pos,
-                    message: format!("Type '{}' doesn't inherits 'Server'", l.tag.r#type),
-                });
+            if !ctx.implements(&proc.tag.scope, &l.tag.r#type, "Receive") {
+                return not_implement(proc.tag.pos, &l.tag.r#type, "Receive");
             }
 
-            if pat_type.is_generic() {
-                let inner_type = l.tag.r#type.inner_type_mut();
-
-                if inner_type.is_generic() {
-                    let constraints = pat_type.constraints();
-                    inner_type.add_constraints(constraints);
-                    // TODO - We might want to pass down those type information that we found.
-                } else {
-                    let constraints = pat_type.constraints();
-                    if inner_type.meets_requirements(&constraints) {
-                        // TODO - We might want to pass down those type information that we found.
-                    } else {
-                        return Err(Error {
-                            pos: r.tag.pos,
-                            message: format!(
-                                "Type '{}' doesn't inherits from {:?}",
-                                inner_type, constraints,
-                            ),
-                        });
-                    }
-                }
-            } else if l.tag.r#type.inner_type().is_generic() {
-                let constraints = l.tag.r#type.inner_type().constraints();
-
-                if !pat_type.meets_requirements(&constraints) {
-                    return Err(Error {
-                        pos: l.tag.pos,
-                        message: format!(
-                            "Type '{}' doesn't inherits from {:?}",
-                            l.tag.r#type.inner_type(),
-                            constraints,
-                        ),
-                    });
-                }
-
-                *l.tag.r#type.inner_type_mut() = pat_type.clone();
-                let l_type = l.tag.r#type.clone();
-                update_val_type_info(ctx, &scope, &mut l, l_type);
-            } else if !l.tag.r#type.typecheck_server_call(&pat_type) {
-                return Err(Error {
-                    pos: r.tag.pos,
-                    message: format!(
-                        "Expected type '{}' but got '{}' instead",
-                        l.tag.r#type.inner_type(),
-                        r.tag.r#type
-                    ),
-                });
+            if !ctx.param_matches(&proc.tag.scope, l.tag.r#type.inner(), &r.tag.r#type) {
+                return type_error(proc.tag.pos, l.tag.r#type.inner(), &r.tag.r#type);
             }
-
-            ann.used.extend(l.tag.used.clone());
-            ann.used.extend(r.tag.used.clone());
 
             Ok(Tag {
                 tag: ann,
@@ -203,18 +89,16 @@ fn annotate_proc(
 
         Proc::Null => Ok(Tag {
             item: Proc::Null,
-            tag: Ann::with_type(Type::process(), proc.tag),
+            tag: Ann::with_type(Type::process(), proc.tag.pos),
         }),
 
         Proc::Parallel(ps) => {
-            let mut ann = Ann::with_type(Type::process(), proc.tag);
+            let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
             let mut new_ps = Vec::new();
 
             for p in ps {
-                let new_scope = ctx.new_scope(&scope);
-                let proc = annotate_proc(ctx, new_scope, p)?;
+                let proc = annotate_proc(ctx, p)?;
 
-                ann.used.extend(proc.tag.used.clone());
                 new_ps.push(proc);
             }
 
@@ -297,13 +181,11 @@ fn update_path_type_info(
 
 fn annotate_abs(
     ctx: &mut Knowledge,
-    scope: &LocalScope,
     tag: Tag<Abs<TypeInfo>, TypeInfo>,
 ) -> Result<Tag<Abs<Ann>, Ann>> {
-    let mut pattern = annotate_pattern(ctx, &scope, tag.item.pattern)?;
-
+    let pattern = annotate_pattern(ctx, tag.item.pattern)?;
     let proc = annotate_proc(ctx, *tag.item.proc)?;
-    let mut ann = proc.tag.clone();
+    let ann = pattern.tag.clone();
 
     Ok(Tag {
         item: Abs {

@@ -97,6 +97,22 @@ impl Type {
         }
     }
 
+    pub fn inner(&self) -> &Type {
+        if let Type::App { rhs, .. } = self {
+            return rhs;
+        }
+
+        self
+    }
+
+    pub fn inner_mut(&mut self) -> &mut Type {
+        if let Type::App { rhs, .. } = self {
+            return rhs;
+        }
+
+        self
+    }
+
     pub fn named(name: impl AsRef<str>) -> Self {
         Type::Var {
             name: name.as_ref().to_string(),
@@ -369,6 +385,13 @@ impl Knowledge {
         Some(self.dict(&type_ref))
     }
 
+    pub fn look_up_type_dict<S: Scope>(&self, scope: &S, r#type: &Type) -> &Dict {
+        match r#type {
+            Type::Var { name } => self.look_up_dict(scope, name.as_ref()).unwrap(),
+            _ => &mut Dict::new(r#type.clone()),
+        }
+    }
+
     pub fn look_up_type_dict_mut<S: Scope>(&mut self, scope: &S, r#type: &Type) -> &mut Dict {
         match r#type {
             Type::Var { name } => self.look_up_dict_mut(scope, name.as_ref()).unwrap(),
@@ -496,6 +519,10 @@ impl Knowledge {
         }
     }
 
+    pub fn implements<S: Scope>(&self, scope: &S, r#type: &Type, constraint: &str) -> bool {
+        self.look_up_type_dict(scope, r#type).implements(constraint)
+    }
+
     pub fn new_scope<S: Scope>(&mut self, parent: &S) -> LocalScope {
         self.scope_gen += 1;
         let id = self.scope_gen;
@@ -512,11 +539,15 @@ impl Knowledge {
                 let require_dict = self.look_up_type_dict_mut(scope, require);
                 let provided_dict = self.look_up_type_dict_mut(scope, provided);
 
-                if is_generic_name(name) {
+                let matches = if is_generic_name(name) {
                     require_dict.impls.is_subset(&provided_dict.impls)
                 } else {
                     require_dict.r#type == provided_dict.r#type
-                }
+                };
+
+                require_dict.r#type = provided_dict.r#type.clone();
+
+                matches
             }
 
             Type::ForAll { binders, body } => {
