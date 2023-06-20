@@ -101,3 +101,12 @@ fn not_implement<A>(pos: Pos, r#type: &Type, constraint: &str) -> eyre::Result<A
         constraint
     )
 }
+
+fn not_a_function<A>(pos: Pos, r#type: &Type) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Type {} is not a function",
+        pos.lone,
+        pos.column,
+        r#type
+    )
+}

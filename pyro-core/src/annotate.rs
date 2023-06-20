@@ -8,7 +8,9 @@ use crate::ast::{Proc, Program, Tag, Val};
 use crate::context::{LocalScope, STDLIB};
 use crate::sym::Literal;
 use crate::typing::{Knowledge, Type, TypeInfo};
-use crate::{not_implement, record_label_not_found, type_error, Ctx, Error, Pos, Result};
+use crate::{
+    not_a_function, not_implement, record_label_not_found, type_error, Ctx, Error, Pos, Result,
+};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum ValCtx {
@@ -109,37 +111,26 @@ fn annotate_proc(
         }
 
         Proc::Decl(d, p) => {
-            let d = annotate_decl(ctx, &scope, d)?;
-            let new_scope = ctx.new_scope(&scope);
-            let p = annotate_proc(ctx, new_scope, *p)?;
-            let mut tag = p.tag.clone();
-            tag.r#type = Type::process();
+            let d = annotate_decl(ctx, d)?;
+            let p = annotate_proc(ctx, *p)?;
 
             Ok(Tag {
                 item: Proc::Decl(d, Box::new(p)),
-                tag,
+                tag: Ann::with_type(Type::process(), proc.tag.pos),
             })
         }
 
         Proc::Cond(val, if_proc, else_proc) => {
-            let val = annotate_val(ctx, &scope, ValCtx::Regular, val)?;
+            let val = annotate_val(ctx, val)?;
 
-            if !Type::bool().parent_type_of(&val.tag.r#type) {
-                return Err(Error {
-                    pos: val.tag.pos,
-                    message: format!("Expected type 'Bool' but got '{}' instead", val.tag.r#type),
-                });
+            let bool_type = Type::bool();
+            if !ctx.param_matches(&proc.tag.scope, &bool_type, &val.tag.r#type) {
+                return type_error(val.tag.pos, &bool_type, &val.tag.r#type);
             }
 
-            let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let new_scope = ctx.new_scope(&scope);
-            let if_proc = annotate_proc(ctx, new_scope, *if_proc)?;
-            let new_scope = ctx.new_scope(&scope);
-            let else_proc = annotate_proc(ctx, new_scope, *else_proc)?;
-
-            ann.used.extend(val.tag.used.clone());
-            ann.used.extend(if_proc.tag.used.clone());
-            ann.used.extend(else_proc.tag.used.clone());
+            let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let if_proc = annotate_proc(ctx, *if_proc)?;
+            let else_proc = annotate_proc(ctx, *else_proc)?;
 
             Ok(Tag {
                 item: Proc::Cond(val, Box::new(if_proc), Box::new(else_proc)),
@@ -231,57 +222,44 @@ fn update_pat_var_type_info(ctx: &mut Ctx, scope: &LocalScope, pat_var: &mut Pat
 }
 
 pub fn annotate_decl(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    decl: Tag<Decl<Pos>, Pos>,
-) -> Result<Tag<Decl<Ann>, Ann>> {
-    let ann = Ann::with_type(Type::process(), decl.tag);
+    ctx: &mut Knowledge,
+    decl: Tag<Decl<TypeInfo>, TypeInfo>,
+) -> eyre::Result<Tag<Decl<Ann>, Ann>> {
+    let ann = Ann::with_type(Type::process(), decl.tag.pos);
     let item = match decl.item {
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
 
             for decl_tag in cs {
-                let (n, t) = decl_tag.item;
-                let t = resolve_type(&ctx, &scope, decl.tag, t)?;
-
-                if !ctx.declare(scope, &n, t.clone()) {
-                    return Err(Error {
-                        pos: decl_tag.tag,
-                        message: format!("Channel '{}' already exists", n),
-                    });
-                }
+                let r#type = ctx.project_type(&decl_tag.tag.pointer);
 
                 chans.push(Tag {
-                    item: (n, t.clone()),
-                    tag: Ann::with_type(t, decl_tag.tag),
+                    item: decl_tag.item,
+                    tag: Ann::with_type(r#type, decl_tag.tag.pos),
                 });
             }
 
             Decl::Channels(chans)
         }
 
-        Decl::Type(n, t) => {
-            let resolved_type = resolve_type(&ctx, &scope, decl.tag, t)?;
-            ctx.declare(scope, &n, resolved_type.clone());
-            Decl::Type(n, resolved_type)
-        }
+        Decl::Type(n, t) => Decl::Type(n, t),
 
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
             for def_tag in defs {
-                let (r#type, abs) = annotate_abs(
-                    ctx,
-                    scope,
-                    def_tag.item.abs,
-                    Some(def_tag.item.name.clone()),
-                )?;
+                let abs = annotate_abs(ctx, def_tag.item.abs)?;
+                let mut dict = ctx
+                    .look_up_dict_mut(&decl.tag.scope, &def_tag.item.name)
+                    .unwrap();
+
+                *dict.r#type = Type::client(abs.tag.r#type.clone());
 
                 new_defs.push(Tag {
                     item: Def {
                         name: def_tag.item.name,
                         abs,
                     },
-                    tag: Ann::with_type(r#type, def_tag.tag),
+                    tag: Ann::with_type(dict.r#type.clone(), def_tag.tag.pos),
                 });
             }
 
@@ -393,7 +371,7 @@ fn annotate_pattern(
 fn annotate_pat_var(
     ctx: &mut Knowledge,
     pat_var: PatVar<TypeInfo>,
-) -> Result<Tag<PatVar<Ann>, Ann>> {
+) -> eyre::Result<Tag<PatVar<Ann>, Ann>> {
     let pattern = if let Some(param) = pat_var.pattern {
         Some(Box::new(annotate_pattern(ctx, *param)?))
     } else {
@@ -419,7 +397,7 @@ fn annotate_pat_var(
 pub fn annotate_val(
     ctx: &mut Knowledge,
     lit: Tag<Val<TypeInfo>, TypeInfo>,
-) -> Result<Tag<Val<Ann>, Ann>> {
+) -> eyre::Result<Tag<Val<Ann>, Ann>> {
     match lit.item {
         Val::Literal(l) => {
             let r#type = Type::from_literal(&l);
@@ -498,48 +476,30 @@ pub fn annotate_val(
         }
 
         Val::AnoClient(abs) => {
-            let (r#type, abs) = annotate_abs(ctx, scope, abs, None)?;
-            let mut ann = abs.tag.clone();
-
-            ann.r#type = Type::client(r#type);
+            let abs = annotate_abs(ctx, abs)?;
+            let r#type = abs.tag.r#type.clone();
 
             Ok(Tag {
                 item: Val::AnoClient(abs),
-                tag: ann,
+                tag: Ann::with_type(Type::client(r#type), lit.tag.pos),
             })
         }
 
         Val::App(caller, param) => {
-            let caller = annotate_val(ctx, &scope, val_ctx, *caller)?;
-            let param = annotate_val(ctx, &scope, val_ctx, *param)?;
+            let caller = annotate_val(ctx, *caller)?;
+            let param = annotate_val(ctx, *param)?;
 
-            if !caller.tag.r#type.meets_requirement(&Type::func_type()) {
-                return Err(Error {
-                    pos: caller.tag.pos,
-                    message: format!(
-                        "Expected a function but got '{}' instead",
-                        caller.tag.r#type,
-                    ),
-                });
-            }
+            let result_type = if let Type::Fun { lhs, rhs } = &caller.tag.r#type {
+                if !ctx.param_matches(&lit.tag.scope, lhs.as_ref(), &param.tag.r#type) {
+                    return type_error(lit.tag.pos, lhs.as_ref(), &param.tag.r#type);
+                }
 
-            let result_type = if let Some(result_type) = caller.tag.r#type.apply(&param.tag.r#type)
-            {
-                result_type
+                rhs.as_ref().clone()
             } else {
-                return Err(Error {
-                    pos: param.tag.pos,
-                    message: format!(
-                        "Expected type '{}' but got '{}' instead",
-                        caller.tag.r#type, param.tag.r#type
-                    ),
-                });
+                return not_a_function(lit.tag.pos, &caller.tag.r#type);
             };
 
-            let mut ann = Ann::with_type(result_type, caller.tag.pos);
-
-            ann.used.extend(caller.tag.used.clone());
-            ann.used.extend(param.tag.used.clone());
+            let ann = Ann::with_type(result_type, lit.tag.pos);
 
             Ok(Tag {
                 item: Val::App(Box::new(caller), Box::new(param)),
