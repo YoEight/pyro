@@ -3,12 +3,12 @@ mod tests;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Var};
 use crate::ast::{Proc, Program, Tag, Val};
 use crate::context::{LocalScope, STDLIB};
 use crate::sym::Literal;
 use crate::typing::{Knowledge, Type, TypeInfo};
-use crate::{Ctx, Error, Pos, Result};
+use crate::{record_label_not_found, type_error, Ctx, Error, Pos, Result};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum ValCtx {
@@ -296,41 +296,22 @@ fn update_path_type_info(
 }
 
 fn annotate_abs(
-    ctx: &mut Ctx,
+    ctx: &mut Knowledge,
     scope: &LocalScope,
-    tag: Tag<Abs<Pos>, Pos>,
-    named: Option<String>,
-) -> Result<(Type, Tag<Abs<Ann>, Ann>)> {
+    tag: Tag<Abs<TypeInfo>, TypeInfo>,
+) -> Result<Tag<Abs<Ann>, Ann>> {
     let mut pattern = annotate_pattern(ctx, &scope, tag.item.pattern)?;
 
-    if let Some(def_name) = named {
-        if !ctx.declare(scope, &def_name, Type::client(pattern.tag.r#type.clone())) {
-            return Err(Error {
-                pos: tag.tag,
-                message: format!("Definition '{}' already exists", def_name),
-            });
-        }
-    }
-
-    let new_scope = ctx.new_scope(scope);
-    let proc = annotate_proc(ctx, new_scope, *tag.item.proc)?;
+    let proc = annotate_proc(ctx, *tag.item.proc)?;
     let mut ann = proc.tag.clone();
 
-    update_pattern_type_info(ctx, scope, &mut pattern);
-
-    ann.pos = tag.tag;
-    ann.used.extend(pattern.tag.used.clone());
-
-    Ok((
-        pattern.tag.r#type.clone(),
-        Tag {
-            item: Abs {
-                pattern,
-                proc: Box::new(proc),
-            },
-            tag: ann,
+    Ok(Tag {
+        item: Abs {
+            pattern,
+            proc: Box::new(proc),
         },
-    ))
+        tag: ann,
+    })
 }
 
 fn update_pattern_type_info(ctx: &mut Ctx, scope: &LocalScope, node: &mut Tag<Pat<Ann>, Ann>) {
@@ -473,17 +454,26 @@ fn literal_type(lit: &Literal) -> Type {
 }
 
 fn annotate_pattern(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    tag: Tag<Pat<Pos>, Pos>,
-) -> Result<Tag<Pat<Ann>, Ann>> {
+    ctx: &mut Knowledge,
+    tag: Tag<Pat<TypeInfo>, TypeInfo>,
+) -> eyre::Result<Tag<Pat<Ann>, Ann>> {
     match tag.item {
         Pat::Var(v) => {
-            let pat_tag = annotate_pat_var(ctx, scope, tag.tag, v)?;
+            let pat_tag = annotate_pat_var(ctx, v)?;
+
+            let r#type = if let Some(pat) = &pat_tag.item.pattern {
+                if !ctx.param_matches(&tag.tag.scope, &pat_tag.tag.r#type, &pat.tag.r#type) {
+                    return type_error(tag.tag.pos, pat_tag.tag.r#type, pat.tag.r#type);
+                }
+
+                pat.tag.r#type.clone()
+            } else {
+                &pat_tag.tag.r#type.clone()
+            };
 
             Ok(Tag {
                 item: Pat::Var(pat_tag.item),
-                tag: pat_tag.tag,
+                tag: Ann::with_type(r#type, tag.tag.pos),
             })
         }
 
@@ -492,7 +482,7 @@ fn annotate_pattern(
             let mut props_type = Vec::new();
 
             for prop in rec.props {
-                let val = annotate_pattern(ctx, scope, prop.val)?;
+                let val = annotate_pattern(ctx, prop.val)?;
 
                 props_type.push(Prop {
                     label: prop.label.clone(),
@@ -508,64 +498,39 @@ fn annotate_pattern(
             let r#type = Type::Record(Record { props: props_type });
             Ok(Tag {
                 item: Pat::Record(Record { props }),
-                tag: Ann::with_type(r#type, tag.tag),
+                tag: Ann::with_type(r#type, tag.tag.pos),
             })
         }
 
-        Pat::Wildcard(t) => {
-            let t = resolve_type(&ctx, scope, tag.tag, t)?;
-
-            Ok(Tag {
-                item: Pat::Wildcard(t.clone()),
-                tag: Ann::with_type(t, tag.tag),
-            })
-        }
+        Pat::Wildcard(t) => Ok(Tag {
+            item: Pat::Wildcard(t.clone()),
+            tag: Ann::with_type(ctx.project_type(&tag.tag.pointer), tag.tag.pos),
+        }),
     }
 }
 fn annotate_pat_var(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    pos: Pos,
-    mut pat_var: PatVar<Pos>,
+    ctx: &mut Knowledge,
+    pat_var: PatVar<TypeInfo>,
 ) -> Result<Tag<PatVar<Ann>, Ann>> {
-    let (r#type, pattern) = if let Some(pat) = pat_var.pattern {
-        let param = Tag {
-            item: *pat,
-            tag: pos,
-        };
-
-        pat_var.var.r#type = resolve_type(&ctx, scope, pos, pat_var.var.r#type)?;
-        let pat = annotate_pattern(ctx, scope, param)?;
-
-        if !pat_var.var.r#type.is_generic() && !pat_var.var.r#type.parent_type_of(&pat.tag.r#type) {
-            return Err(Error {
-                pos,
-                message: format!(
-                    "Expected type '{}' but got '{}' instead",
-                    pat_var.var.r#type, pat.tag.r#type
-                ),
-            });
-        }
-
-        (pat.tag.r#type, Some(Box::new(pat.item)))
+    let pattern = if let Some(param) = pat_var.pattern {
+        Some(Box::new(annotate_pattern(ctx, *param)?))
     } else {
-        pat_var.var.r#type = resolve_type(&ctx, scope, pos, pat_var.var.r#type.clone())?;
-        (pat_var.var.r#type.clone(), None)
+        None
     };
 
-    if !ctx.declare(scope, &pat_var.var.id, r#type.clone()) {
-        return Err(Error {
-            pos,
-            message: format!("Variable '{}' already exists", pat_var.var.id),
-        });
-    }
+    let var = Var {
+        id: pat_var.var.id,
+        r#type: pat_var.var.r#type,
+        tag: Ann::with_type(
+            ctx.project_type(&pat_var.var.tag.pointer),
+            pat_var.var.tag.pos,
+        ),
+    };
 
+    let tag = var.tag.clone();
     Ok(Tag {
-        item: PatVar {
-            var: pat_var.var,
-            pattern,
-        },
-        tag: Ann::with_type(r#type.clone(), pos),
+        item: PatVar { var, pattern },
+        tag,
     })
 }
 
@@ -576,9 +541,6 @@ pub fn annotate_val(
     match lit.item {
         Val::Literal(l) => {
             let r#type = Type::from_literal(&l);
-            let projected_type = ctx.project_type(&lit.tag.pointer);
-
-            ctx.param_matches()
 
             Ok(Tag {
                 item: Val::Literal(l),
@@ -590,15 +552,8 @@ pub fn annotate_val(
             let mut path = p.clone();
             path.reverse();
             let name = path.pop().unwrap();
-            let r#type = if let Some(r#type) = ctx.look_up(scope, &name) {
-                r#type
-            } else {
-                return Err(Error {
-                    pos: lit.tag,
-                    message: format!("Variable '{}' doesn't exist", name),
-                });
-            };
-            let r#type = if let Type::Record(mut rec) = r#type.clone() {
+            let r#type = ctx.project_type(&lit.tag.pointer);
+            let r#type = if let Type::Record(mut rec) = r#type {
                 let mut temp = None;
 
                 while let Some(frag) = path.pop() {
@@ -612,10 +567,7 @@ pub fn annotate_val(
                         break;
                     }
 
-                    return Err(Error {
-                        pos: lit.tag,
-                        message: format!("Record label '{}' doesn't exist", name),
-                    });
+                    return record_label_not_found(lit.tag.pos, &name)?;
                 }
 
                 if let Some(r#type) = temp {
@@ -624,11 +576,10 @@ pub fn annotate_val(
                     Type::Record(rec)
                 }
             } else {
-                r#type.clone()
+                r#type
             };
 
-            let mut ann = Ann::with_type(r#type.clone(), lit.tag);
-            ann.used.insert(name.clone(), r#type);
+            let mut ann = Ann::with_type(r#type, lit.tag.pos);
 
             Ok(Tag {
                 item: Val::Path(p),
@@ -642,7 +593,7 @@ pub fn annotate_val(
             let mut used = HashMap::new();
 
             for prop in xs.props {
-                let val = annotate_val(ctx, &scope, ValCtx::Regular, prop.val)?;
+                let val = annotate_val(ctx, prop.val)?;
 
                 used.extend(val.tag.used.clone());
 
@@ -657,8 +608,7 @@ pub fn annotate_val(
                 });
             }
 
-            let mut ann = Ann::with_type(Type::Record(Record { props: types }), lit.tag);
-            ann.used = used;
+            let mut ann = Ann::with_type(Type::Record(Record { props: types }), lit.tag.pos);
             Ok(Tag {
                 item: Val::Record(Record { props }),
                 tag: ann,

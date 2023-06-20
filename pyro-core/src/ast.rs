@@ -60,8 +60,8 @@ pub enum Pat<A> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PatVar<A> {
-    pub var: Var,
-    pub pattern: Option<Box<Pat<A>>>,
+    pub var: Var<A>,
+    pub pattern: Option<Box<Tag<Pat<A>, A>>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -89,9 +89,10 @@ impl<A> std::fmt::Display for Val<A> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Var {
+pub struct Var<A> {
     pub id: String,
     pub r#type: TypeSym,
+    pub tag: A,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

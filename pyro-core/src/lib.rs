@@ -13,7 +13,7 @@ pub mod tokenizer;
 mod typing;
 mod utils;
 
-use crate::typing::Knowledge;
+use crate::typing::{Knowledge, Type};
 pub use context::{Ctx, STDLIB};
 
 /// Location in input string
@@ -70,5 +70,24 @@ fn type_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
         pos.line,
         pos.column,
         name
+    )
+}
+
+fn record_label_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Record label '{}' does not exist",
+        pos.line,
+        pos.column,
+        name
+    )
+}
+
+fn type_error<A>(pos: Pos, expected: Type, got: Type) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Expected type {} but got {}",
+        pos.line,
+        pos.column,
+        expected,
+        got
     )
 }

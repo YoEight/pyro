@@ -9,12 +9,9 @@ use std::fmt::{write, Display, Formatter};
 #[derive(Clone)]
 pub enum TypePointer {
     Ref(TypeRef),
-    Scoped(String),
     Rec(Record<TypePointer>),
     Fun(Box<TypePointer>, Box<TypePointer>),
     App(Box<TypePointer>, Box<TypePointer>),
-    ForAll(Vec<String>, Box<TypePointer>),
-    Qual(Vec<TypePointer>, Box<TypePointer>),
 }
 
 #[derive(Clone)]
@@ -372,6 +369,13 @@ impl Knowledge {
         Some(self.dict(&type_ref))
     }
 
+    pub fn look_up_type_dict_mut<S: Scope>(&mut self, scope: &S, r#type: &Type) -> &mut Dict {
+        match r#type {
+            Type::Var { name } => self.look_up_dict_mut(scope, name.as_ref()).unwrap(),
+            _ => &mut Dict::new(r#type.clone()),
+        }
+    }
+
     pub fn look_up_dict_mut<S: Scope>(&mut self, scope: &S, name: &str) -> Option<&mut Dict> {
         let type_ref = self.look_up(scope, name)?;
 
@@ -502,25 +506,20 @@ impl Knowledge {
         LocalScope { ancestors }
     }
 
-    pub fn param_matches<S: Scope>(
-        &mut self,
-        scope: &S,
-        require: &TypePointer,
-        provided: &TypePointer,
-    ) -> bool {
+    pub fn param_matches<S: Scope>(&mut self, scope: &S, require: &Type, provided: &Type) -> bool {
         match require {
-            TypePointer::Ref(id) => {
-                let provided_dict = self.project_type_pointer_dict(provided);
-                let require_dict = self.dict(type_ref);
+            Type::Var { name } => {
+                let require_dict = self.look_up_type_dict_mut(scope, require);
+                let provided_dict = self.look_up_type_dict_mut(scope, provided);
 
-                if is_generic_name(&id.name) {
+                if is_generic_name(name) {
                     require_dict.impls.is_subset(&provided_dict.impls)
                 } else {
                     require_dict.r#type == provided_dict.r#type
                 }
             }
 
-            TypePointer::ForAll(binders, body) => {
+            Type::ForAll { binders, body } => {
                 let new_scope = self.new_scope(scope);
                 for binder in binders {
                     self.declare(&new_scope, binder, Dict::new(Type::named(binder)));
@@ -529,19 +528,17 @@ impl Knowledge {
                 self.param_matches(&new_scope, body.as_ref(), provided)
             }
 
-            TypePointer::Qual(ctx, body) => {
+            Type::Qual { ctx, body } => {
                 for constraint in ctx {
-                    if let TypePointer::App(lhs, rhs) = constraint {
+                    if let Type::App { lhs, rhs } = constraint {
                         match (lhs.as_ref(), rhs.as_ref()) {
                             // TODO - If we want Haskell-like higher kinded types, we need to make that
                             // part more flexible. Right now we don't support universally quantified higher
                             // kinded types.
-                            (TypePointer::Ref(constr), TypePointer::Scoped(var_name)) => {
-                                let var_dict = self
-                                    .look_up_dict_mut(scope, var_name)
-                                    .expect("Must be defined at that level");
+                            (Type::Var { name: constr }, Type::Var { .. }) => {
+                                let var_dict = self.look_up_type_dict_mut(scope, rhs.as_ref());
 
-                                var_dict.add(constr.);
+                                var_dict.add(constr);
                             }
 
                             _ => unreachable!(),
@@ -552,8 +549,15 @@ impl Knowledge {
                 self.param_matches(scope, body.as_ref(), provided)
             }
 
-            TypePointer::Fun(require_lhs, require_rhs) => {
-                if let TypePointer::Fun(provided_lhs, provided_rhs) = &provided {
+            Type::Fun {
+                lhs: require_lhs,
+                rhs: require_rhs,
+            } => {
+                if let Type::Fun {
+                    lhs: provided_lhs,
+                    rhs: provided_rhs,
+                } = &provided
+                {
                     return self.param_matches(scope, require_lhs.as_ref(), provided_lhs.as_ref())
                         && self.param_matches(scope, require_rhs.as_ref(), provided_rhs.as_ref());
                 }
@@ -561,8 +565,15 @@ impl Knowledge {
                 false
             }
 
-            TypePointer::App(require_lhs, require_rhs) => {
-                if let TypePointer::App(provided_lhs, provided_rhs) = &provided {
+            Type::App {
+                lhs: require_lhs,
+                rhs: require_rhs,
+            } => {
+                if let Type::App {
+                    lhs: provided_lhs,
+                    rhs: provided_rhs,
+                } = &provided
+                {
                     return self.param_matches(scope, require_lhs.as_ref(), provided_lhs.as_ref())
                         && self.param_matches(scope, require_rhs.as_ref(), provided_rhs.as_ref());
                 }
@@ -570,8 +581,11 @@ impl Knowledge {
                 false
             }
 
-            TypePointer::Rec(require_rec) => {
-                if let TypePointer::Rec(provided_rec) = provided {
+            Type::Rec { props: require_rec } => {
+                if let Type::Rec {
+                    props: provided_rec,
+                } = provided
+                {
                     if require_rec.props.len() != provided_rec.props.len() {
                         return false;
                     }
@@ -596,50 +610,45 @@ impl Knowledge {
         }
     }
 
-    pub fn type_check_send<S: Scope>(
-        &mut self,
-        scope: &S,
-        target: &TypePointer,
-        params: &TypePointer,
-    ) -> bool {
+    pub fn type_check_send<S: Scope>(&mut self, scope: &S, target: &Type, params: &Type) -> bool {
         let inner_type = {
-            let target_dict = self.project_type_pointer_dict(target);
+            let target_dict = self.look_up_type_dict_mut(scope, target);
 
             if !target_dict.implements("Send") {
                 return false;
             }
 
-            if let TypePointer::App(_, inner) = target {
-                inner.clone()
+            if let Type::App { rhs, .. } = target {
+                rhs.as_ref()
             } else {
                 unreachable!()
             }
         };
 
-        self.param_matches(scope, &self.project_type(&inner_type), &params)
+        self.param_matches(scope, inner_type, params)
     }
 
     pub fn type_check_receive<S: Scope>(
         &mut self,
         scope: &S,
-        target: &TypePointer,
-        params: &TypePointer,
+        target: &Type,
+        params: &Type,
     ) -> bool {
         let inner_type = {
-            let target_dict = self.project_type_pointer_dict(target);
+            let target_dict = self.look_up_type_dict_mut(scope, target);
 
             if !target_dict.implements("Receive") {
                 return false;
             }
 
-            if let TypePointer::App(_, inner) = target {
-                inner.clone()
+            if let Type::App { rhs, .. } = target {
+                rhs.as_ref()
             } else {
                 unreachable!()
             }
         };
 
-        self.param_matches(scope, &self.project_type(&inner_type), &params)
+        self.param_matches(scope, inner_type, params)
     }
 }
 
@@ -651,74 +660,38 @@ fn is_generic_name(name: &str) -> bool {
 fn test_type_check_client_easy() {
     let mut know = Knowledge::standard();
     let scope = know.new_scope(&STDLIB);
-    let foo_type = Type::client(Type::integer());
-    let client = know.look_up(&scope, "Client").unwrap();
-    let param = know.look_up(&scope, "Integer").unwrap();
-    let mut foo_dict = know.dict(&client).clone();
-    let param_dict = know.dict(&param).clone();
-    foo_dict.r#type = foo_type;
 
-    let foo = know.declare(&scope, "foo", foo_dict);
-    let bar = know.declare(&scope, "bar", param_dict);
-
-    assert!(know.type_check_send(&scope, &foo, &bar));
+    assert!(know.type_check_send(&scope, &Type::client(Type::integer()), &Type::integer()));
 }
 
 #[test]
 fn test_type_check_generic() {
     let mut know = Knowledge::standard();
-    let scope = know.new_scope(&STDLIB);
-    let client_ref = know.look_up(&scope, "Client").unwrap();
-    let client_dict = know.dict(&client_ref);
-    let target_type = Type::app(
-        client_dict.r#type.clone(),
-        Type::ForAll {
-            binders: vec!["a".to_string()],
-            body: Box::new(Type::Qual {
-                ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
-                body: Box::new(Type::named("a")),
-            }),
-        },
-    );
+    let target_type = Type::client(Type::ForAll {
+        binders: vec!["a".to_string()],
+        body: Box::new(Type::Qual {
+            ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
+            body: Box::new(Type::named("a")),
+        }),
+    });
 
-    let mut target_dict = client_dict.clone();
-    target_dict.r#type = target_type;
-
-    let integer = know.look_up(&scope, "Integer").unwrap();
-    let integer_dict = know.dict(&integer).clone();
-
-    let target = know.declare(&scope, "foo", target_dict);
-    let param = know.declare(&scope, "bar", integer_dict);
-
-    assert!(know.type_check_send(&scope, &target, &param));
+    assert!(know.type_check_send(&STDLIB, &target_type, &Type::integer()));
 }
 
 #[test]
 fn test_type_check_generic_complex() {
     let mut know = Knowledge::standard();
-    let scope = know.new_scope(&STDLIB);
-    let client_ref = know.look_up(&scope, "Client").unwrap();
-    let client_dict = know.dict(&client_ref);
-    let target_type = Type::app(
-        client_dict.r#type.clone(),
-        Type::record(vec![Prop::ano(Type::ForAll {
-            binders: vec!["a".to_string()],
-            body: Box::new(Type::Qual {
-                ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
-                body: Box::new(Type::named("a")),
-            }),
-        })]),
-    );
+    let target_type = Type::client(Type::record(vec![Prop::ano(Type::ForAll {
+        binders: vec!["a".to_string()],
+        body: Box::new(Type::Qual {
+            ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
+            body: Box::new(Type::named("a")),
+        }),
+    })]));
 
-    let mut target_dict = client_dict.clone();
-    target_dict.r#type = target_type;
-
-    let integer = know.look_up(&scope, "Integer").unwrap();
-    let integer_dict = know.dict(&integer).clone();
-    let param_dict = Dict::new(Type::record(vec![Prop::ano(integer_dict.r#type)]));
-
-    let target = know.declare(&scope, "foo", target_dict);
-    let param = know.declare(&scope, "bar", param_dict);
-
-    assert!(know.type_check_send(&scope, &target, &param));
+    assert!(know.type_check_send(
+        &STDLIB,
+        &target_type,
+        &Type::record(vec![Prop::ano(Type::integer())])
+    ));
 }
