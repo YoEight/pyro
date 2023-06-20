@@ -1,19 +1,26 @@
 use crate::ast::{Prop, Record};
 use crate::context::{LocalScope, Scope};
+use crate::sym::{Literal, TypeSym};
 use crate::utils::generate_generic_type_name;
-use crate::{Ctx, STDLIB};
+use crate::{Ctx, Pos, STDLIB};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{write, Display, Formatter};
+
 #[derive(Clone)]
 pub enum TypePointer {
     Ref(TypeRef),
+    Scoped(String),
     Rec(Record<TypePointer>),
     Fun(Box<TypePointer>, Box<TypePointer>),
     App(Box<TypePointer>, Box<TypePointer>),
+    ForAll(Vec<String>, Box<TypePointer>),
+    Qual(Vec<TypePointer>, Box<TypePointer>),
 }
 
 #[derive(Clone)]
 pub struct TypeInfo {
+    pub pos: Pos,
+    pub scope: LocalScope,
     pub pointer: TypePointer,
 }
 
@@ -84,6 +91,15 @@ impl Display for Type {
 }
 
 impl Type {
+    pub fn from_literal(lit: &Literal) -> Self {
+        match lit {
+            Literal::Integer(_) => Self::integer(),
+            Literal::String(_) => Self::string(),
+            Literal::Char(_) => Self::char(),
+            Literal::Bool(_) => Self::bool(),
+        }
+    }
+
     pub fn named(name: impl AsRef<str>) -> Self {
         Type::Var {
             name: name.as_ref().to_string(),
@@ -384,6 +400,57 @@ impl Knowledge {
         }
     }
 
+    pub fn project_type_pointer<S: Scope>(
+        &mut self,
+        scope: &S,
+        sym: &TypeSym,
+    ) -> Result<TypePointer, String> {
+        match sym {
+            TypeSym::Name(n) => {
+                if let Some(type_ref) = self.look_up(scope, n.as_str()) {
+                    Ok(TypePointer::Ref(type_ref))
+                } else {
+                    Err(n.clone())
+                }
+            }
+
+            TypeSym::App(c, i) => {
+                let c = self.project_type_pointer(scope, c.as_ref())?;
+                let i = self.project_type_pointer(scope, i.as_ref())?;
+
+                Ok(TypePointer::App(Box::new(c), Box::new(i)))
+            }
+
+            TypeSym::Rec(rec) => {
+                let rec = rec.traverse_result(|v| self.project_type_pointer(scope, &v))?;
+
+                Ok(TypePointer::Rec(rec))
+            }
+
+            TypeSym::Unknown => Ok(TypePointer::Ref(self.new_generic(scope))),
+        }
+    }
+
+    pub fn project_type_pointer_dict(&self, pointer: &TypePointer) -> Dict {
+        match pointer {
+            TypePointer::Ref(r) => self.dict(r).clone(),
+            TypePointer::Rec(_) => Dict::new(self.project_type(pointer)),
+            TypePointer::Fun(p, r) => {
+                let r#type =
+                    Type::app(self.project_type(p.as_ref()), self.project_type(r.as_ref()));
+
+                Dict::new(r#type)
+            }
+            TypePointer::App(c, i) => {
+                let mut dict = self.project_type_pointer_dict(c.as_ref());
+                let inner = self.project_type_pointer_dict(i.as_ref());
+
+                dict.r#type = Type::app(dict.r#type, inner.r#type);
+                dict
+            }
+        }
+    }
+
     pub fn project_type(&self, id: &TypePointer) -> Type {
         match id {
             TypePointer::Ref(r) => self.dict(r).r#type.clone(),
@@ -438,24 +505,22 @@ impl Knowledge {
     pub fn param_matches<S: Scope>(
         &mut self,
         scope: &S,
-        require: &Type,
-        provided: &TypeRef,
+        require: &TypePointer,
+        provided: &TypePointer,
     ) -> bool {
         match require {
-            Type::Var { name } => {
-                let provided_dict = self.dict(provided);
-                let require_dict = self
-                    .look_up_dict(scope, name)
-                    .expect("Must be defined at that level");
+            TypePointer::Ref(id) => {
+                let provided_dict = self.project_type_pointer_dict(provided);
+                let require_dict = self.dict(type_ref);
 
-                if is_generic_name(name) {
+                if is_generic_name(&id.name) {
                     require_dict.impls.is_subset(&provided_dict.impls)
                 } else {
                     require_dict.r#type == provided_dict.r#type
                 }
             }
 
-            Type::ForAll { binders, body } => {
+            TypePointer::ForAll(binders, body) => {
                 let new_scope = self.new_scope(scope);
                 for binder in binders {
                     self.declare(&new_scope, binder, Dict::new(Type::named(binder)));
@@ -464,16 +529,19 @@ impl Knowledge {
                 self.param_matches(&new_scope, body.as_ref(), provided)
             }
 
-            Type::Qual { ctx, body } => {
+            TypePointer::Qual(ctx, body) => {
                 for constraint in ctx {
-                    if let Type::App { lhs, rhs } = constraint {
+                    if let TypePointer::App(lhs, rhs) = constraint {
                         match (lhs.as_ref(), rhs.as_ref()) {
-                            (Type::Var { name: constr_name }, Type::Var { name: var_name }) => {
+                            // TODO - If we want Haskell-like higher kinded types, we need to make that
+                            // part more flexible. Right now we don't support universally quantified higher
+                            // kinded types.
+                            (TypePointer::Ref(constr), TypePointer::Scoped(var_name)) => {
                                 let var_dict = self
                                     .look_up_dict_mut(scope, var_name)
                                     .expect("Must be defined at that level");
 
-                                var_dict.add(constr_name);
+                                var_dict.add(constr.);
                             }
 
                             _ => unreachable!(),
@@ -484,75 +552,26 @@ impl Knowledge {
                 self.param_matches(scope, body.as_ref(), provided)
             }
 
-            Type::Fun {
-                lhs: require_lhs,
-                rhs: require_rhs,
-            } => {
-                let provided_type = { self.dict(provided).r#type.clone() };
-
-                if let Type::Fun {
-                    lhs: provided_lhs,
-                    rhs: provided_rhs,
-                } = &provided_type
-                {
-                    let param_matches =
-                        if let Some(provided) = self.type_ref(scope, provided_lhs.as_ref()) {
-                            self.param_matches(scope, require_lhs.as_ref(), &provided)
-                        } else {
-                            require_lhs == provided_lhs
-                        };
-
-                    let result_matches =
-                        if let Some(provided) = self.type_ref(scope, provided_rhs.as_ref()) {
-                            self.param_matches(scope, require_rhs.as_ref(), &provided)
-                        } else {
-                            require_rhs == provided_rhs
-                        };
-
-                    return param_matches && result_matches;
+            TypePointer::Fun(require_lhs, require_rhs) => {
+                if let TypePointer::Fun(provided_lhs, provided_rhs) = &provided {
+                    return self.param_matches(scope, require_lhs.as_ref(), provided_lhs.as_ref())
+                        && self.param_matches(scope, require_rhs.as_ref(), provided_rhs.as_ref());
                 }
 
                 false
             }
 
-            Type::App {
-                lhs: require_lhs,
-                rhs: require_rhs,
-            } => {
-                let provided_type = { self.dict(provided).r#type.clone() };
-
-                if let Type::App {
-                    lhs: provided_lhs,
-                    rhs: provided_rhs,
-                } = &provided_type
-                {
-                    let constr_matches =
-                        if let Some(provided) = self.type_ref(scope, provided_lhs.as_ref()) {
-                            self.param_matches(scope, require_lhs.as_ref(), &provided)
-                        } else {
-                            require_lhs == provided_lhs
-                        };
-
-                    let inner_matches =
-                        if let Some(provided) = self.type_ref(scope, provided_rhs.as_ref()) {
-                            self.param_matches(scope, require_rhs.as_ref(), &provided)
-                        } else {
-                            require_rhs == provided_rhs
-                        };
-
-                    return constr_matches && inner_matches;
+            TypePointer::App(require_lhs, require_rhs) => {
+                if let TypePointer::App(provided_lhs, provided_rhs) = &provided {
+                    return self.param_matches(scope, require_lhs.as_ref(), provided_lhs.as_ref())
+                        && self.param_matches(scope, require_rhs.as_ref(), provided_rhs.as_ref());
                 }
 
                 false
             }
 
-            Type::Rec { props: require_rec } => {
-                let provided_type = { self.dict(provided).r#type.clone() };
-
-                if let Type::Rec {
-                    props: provided_rec,
-                } = &provided_type
-                {
+            TypePointer::Rec(require_rec) => {
+                if let TypePointer::Rec(provided_rec) = provided {
                     if require_rec.props.len() != provided_rec.props.len() {
                         return false;
                     }
@@ -564,14 +583,7 @@ impl Knowledge {
                             return false;
                         }
 
-                        let matches =
-                            if let Some(provided) = self.type_ref(scope, &provided_prop.val) {
-                                self.param_matches(scope, &require_prop.val, &provided)
-                            } else {
-                                require_prop.val == provided_prop.val
-                            };
-
-                        if !matches {
+                        if !self.param_matches(scope, &require_prop.val, &provided_prop.val) {
                             return false;
                         }
                     }
@@ -587,47 +599,47 @@ impl Knowledge {
     pub fn type_check_send<S: Scope>(
         &mut self,
         scope: &S,
-        target: &TypeRef,
-        params: &TypeRef,
+        target: &TypePointer,
+        params: &TypePointer,
     ) -> bool {
         let inner_type = {
-            let target_dict = self.dict(target);
+            let target_dict = self.project_type_pointer_dict(target);
 
             if !target_dict.implements("Send") {
                 return false;
             }
 
-            if let Type::App { rhs, .. } = &target_dict.r#type {
-                rhs.clone()
+            if let TypePointer::App(_, inner) = target {
+                inner.clone()
             } else {
                 unreachable!()
             }
         };
 
-        self.param_matches(scope, &inner_type, &params)
+        self.param_matches(scope, &self.project_type(&inner_type), &params)
     }
 
     pub fn type_check_receive<S: Scope>(
         &mut self,
         scope: &S,
-        target: &TypeRef,
-        params: &TypeRef,
+        target: &TypePointer,
+        params: &TypePointer,
     ) -> bool {
         let inner_type = {
-            let target_dict = self.dict(target);
+            let target_dict = self.project_type_pointer_dict(target);
 
             if !target_dict.implements("Receive") {
                 return false;
             }
 
-            if let Type::App { rhs, .. } = &target_dict.r#type {
-                rhs.clone()
+            if let TypePointer::App(_, inner) = target {
+                inner.clone()
             } else {
                 unreachable!()
             }
         };
 
-        self.param_matches(scope, &inner_type, &params)
+        self.param_matches(scope, &self.project_type(&inner_type), &params)
     }
 }
 

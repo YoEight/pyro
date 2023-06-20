@@ -1,12 +1,13 @@
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Type};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record};
 use crate::ast::{Proc, Program, Tag, Val};
 use crate::context::{LocalScope, STDLIB};
 use crate::sym::Literal;
+use crate::typing::{Knowledge, Type, TypeInfo};
 use crate::{Ctx, Error, Pos, Result};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
@@ -20,7 +21,7 @@ pub enum ValCtx {
 pub struct Ann {
     pub pos: Pos,
     pub r#type: Type,
-    pub used: HashMap<String, Type>,
+    pub used: HashSet<String>,
 }
 
 impl Ann {
@@ -33,27 +34,25 @@ impl Ann {
     }
 }
 
-pub fn annotate_program(mut ctx: Ctx, prog: Program<Pos>) -> Result<Program<Ann>> {
+pub fn annotate_program(mut ctx: Knowledge, prog: Program<TypeInfo>) -> Result<Program<Ann>> {
     let mut annotated = Vec::new();
 
     for proc in prog.procs {
-        let new_scope = ctx.new_scope(&STDLIB);
-        annotated.push(annotate_proc(&mut ctx, new_scope, proc)?);
+        annotated.push(annotate_proc(&mut ctx, proc)?);
     }
 
     Ok(Program { procs: annotated })
 }
 
 fn annotate_proc(
-    ctx: &mut Ctx,
-    scope: LocalScope,
-    proc: Tag<Proc<Pos>, Pos>,
+    ctx: &mut Knowledge,
+    proc: Tag<Proc<TypeInfo>, TypeInfo>,
 ) -> Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
-            let mut ann = Ann::with_type(Type::process(), proc.tag);
-            let mut l = annotate_val(ctx, &scope, ValCtx::Output, l)?;
-            let mut r = annotate_val(ctx, &scope, ValCtx::Regular, r)?;
+            let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let mut l = annotate_val(ctx, l)?;
+            let mut r = annotate_val(ctx, r)?;
 
             if l.tag.r#type.is_generic() {
                 if !l.tag.r#type.meets_requirement(&Type::client_type()) {
@@ -571,93 +570,71 @@ fn annotate_pat_var(
 }
 
 pub fn annotate_val(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    val_ctx: ValCtx,
-    lit: Tag<Val<Pos>, Pos>,
+    ctx: &mut Knowledge,
+    lit: Tag<Val<TypeInfo>, TypeInfo>,
 ) -> Result<Tag<Val<Ann>, Ann>> {
     match lit.item {
         Val::Literal(l) => {
-            let r#type = literal_type(&l);
+            let r#type = Type::from_literal(&l);
+            let projected_type = ctx.project_type(&lit.tag.pointer);
+
+            ctx.param_matches()
 
             Ok(Tag {
                 item: Val::Literal(l),
-                tag: Ann::with_type(r#type, lit.tag),
+                tag: Ann::with_type(r#type, lit.tag.pos),
             })
         }
 
-        Val::Path(p) => match val_ctx {
-            ValCtx::Input | ValCtx::Output => {
-                let name = p.first().unwrap();
-                let r#type = if let Some(r#type) = ctx.look_up(scope, name) {
-                    r#type
-                } else {
-                    return Err(Error {
-                        pos: lit.tag,
-                        message: format!("Variable '{}' doesn't exist", name),
-                    });
-                };
+        Val::Path(p) => {
+            let mut path = p.clone();
+            path.reverse();
+            let name = path.pop().unwrap();
+            let r#type = if let Some(r#type) = ctx.look_up(scope, &name) {
+                r#type
+            } else {
+                return Err(Error {
+                    pos: lit.tag,
+                    message: format!("Variable '{}' doesn't exist", name),
+                });
+            };
+            let r#type = if let Type::Record(mut rec) = r#type.clone() {
+                let mut temp = None;
 
-                let mut ann = Ann::with_type(r#type.clone(), lit.tag);
-
-                ann.used.insert(name.clone(), r#type.clone());
-
-                Ok(Tag {
-                    item: Val::Path(p),
-                    tag: ann,
-                })
-            }
-
-            ValCtx::Regular => {
-                let mut path = p.clone();
-                path.reverse();
-                let name = path.pop().unwrap();
-                let r#type = if let Some(r#type) = ctx.look_up(scope, &name) {
-                    r#type
-                } else {
-                    return Err(Error {
-                        pos: lit.tag,
-                        message: format!("Variable '{}' doesn't exist", name),
-                    });
-                };
-                let r#type = if let Type::Record(mut rec) = r#type.clone() {
-                    let mut temp = None;
-
-                    while let Some(frag) = path.pop() {
-                        if let Some(prop) = rec.find_by_prop(&frag) {
-                            if let Type::Record(inner) = prop.val {
-                                rec = inner;
-                                continue;
-                            }
-
-                            temp = Some(prop.val);
-                            break;
+                while let Some(frag) = path.pop() {
+                    if let Some(prop) = rec.find_by_prop(&frag) {
+                        if let Type::Record(inner) = prop.val {
+                            rec = inner;
+                            continue;
                         }
 
-                        return Err(Error {
-                            pos: lit.tag,
-                            message: format!("Record label '{}' doesn't exist", name),
-                        });
+                        temp = Some(prop.val);
+                        break;
                     }
 
-                    if let Some(r#type) = temp {
-                        r#type
-                    } else {
-                        Type::Record(rec)
-                    }
+                    return Err(Error {
+                        pos: lit.tag,
+                        message: format!("Record label '{}' doesn't exist", name),
+                    });
+                }
+
+                if let Some(r#type) = temp {
+                    r#type
                 } else {
-                    r#type.clone()
-                };
+                    Type::Record(rec)
+                }
+            } else {
+                r#type.clone()
+            };
 
-                let mut ann = Ann::with_type(r#type.clone(), lit.tag);
-                ann.used.insert(name.clone(), r#type);
+            let mut ann = Ann::with_type(r#type.clone(), lit.tag);
+            ann.used.insert(name.clone(), r#type);
 
-                Ok(Tag {
-                    item: Val::Path(p),
-                    tag: ann,
-                })
-            }
-        },
+            Ok(Tag {
+                item: Val::Path(p),
+                tag: ann,
+            })
+        }
 
         Val::Record(xs) => {
             let mut props = Vec::new();

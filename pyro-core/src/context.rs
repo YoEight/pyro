@@ -1,9 +1,9 @@
-use crate::ast::Type;
 use std::collections::HashMap;
 
 pub trait Scope {
     fn id(&self) -> u32;
     fn ancestors(&self) -> &[u32];
+    fn as_local(&self) -> LocalScope;
 }
 
 pub struct STDLIB;
@@ -24,6 +24,10 @@ impl Scope for STDLIB {
     fn ancestors(&self) -> &[u32] {
         &[0]
     }
+
+    fn as_local(&self) -> LocalScope {
+        self.as_local_scope()
+    }
 }
 
 #[derive(Default, Clone)]
@@ -38,6 +42,10 @@ impl Scope for LocalScope {
 
     fn ancestors(&self) -> &[u32] {
         self.ancestors.as_slice()
+    }
+
+    fn as_local(&self) -> LocalScope {
+        self.clone()
     }
 }
 

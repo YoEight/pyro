@@ -13,6 +13,7 @@ pub mod tokenizer;
 mod typing;
 mod utils;
 
+use crate::typing::Knowledge;
 pub use context::{Ctx, STDLIB};
 
 /// Location in input string
@@ -46,10 +47,28 @@ pub fn tokenize(src: &str) -> eyre::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-pub fn parse(ctx: Ctx, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
+pub fn parse(ctx: Knowledge, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
     let tokens = tokenize(src)?;
     let parser = Parser::new(tokens.as_slice());
     let program = annotate_program(ctx, parser.parse()?)?;
 
     Ok(program.procs)
+}
+
+fn variable_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Variable '{}' does not exist",
+        pos.line,
+        pos.column,
+        name
+    )
+}
+
+fn type_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Type '{}' does not exist",
+        pos.line,
+        pos.column,
+        name
+    )
 }

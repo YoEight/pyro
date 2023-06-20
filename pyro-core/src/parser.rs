@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
-use crate::sym::{Keyword, Punctuation, Sym};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
+use crate::sym::{Keyword, Punctuation, Sym, TypeSym};
 use crate::tokenizer::Token;
 use crate::utils::generate_generic_type_name;
 use crate::{Error, Pos, Result};
@@ -29,7 +29,7 @@ impl RecordKind for RecordValue {
 }
 
 impl RecordKind for RecordType {
-    type Value = Type;
+    type Value = TypeSym;
 
     fn parse_value(&self, state: &mut ParserState) -> Result<Self::Value> {
         state.parse_type()
@@ -150,19 +150,17 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn parse_rtype(&mut self) -> Result<Type> {
+    pub fn parse_rtype(&mut self) -> Result<TypeSym> {
         if self.next_punct(Punctuation::Colon) {
             self.shift();
             self.skip_spaces();
             self.parse_type()
         } else {
-            Ok(Type::generic(generate_generic_type_name(
-                self.next_type_id(),
-            )))
+            Ok(TypeSym::Unknown)
         }
     }
 
-    fn parse_type(&mut self) -> Result<Type> {
+    fn parse_type(&mut self) -> Result<TypeSym> {
         enum Constr {
             InOut,
             In,
@@ -176,7 +174,7 @@ impl<'a> ParserState<'a> {
             match token.item() {
                 Sym::Type(s) => {
                     self.shift();
-                    break Type::named(s);
+                    break TypeSym::Name(s.clone());
                 }
 
                 Sym::Punctuation(p)
@@ -210,9 +208,24 @@ impl<'a> ParserState<'a> {
 
         while let Some(constr) = constrs.pop() {
             match constr {
-                Constr::InOut => r#type = Type::channel(r#type),
-                Constr::In => r#type = Type::server(r#type),
-                Constr::Out => r#type = Type::client(r#type),
+                Constr::InOut => {
+                    r#type = TypeSym::App(
+                        Box::new(TypeSym::Name("Channel".to_string())),
+                        Box::new(r#type),
+                    )
+                }
+                Constr::In => {
+                    r#type = TypeSym::App(
+                        Box::new(TypeSym::Name("Server".to_string())),
+                        Box::new(r#type),
+                    )
+                }
+                Constr::Out => {
+                    r#type = TypeSym::App(
+                        Box::new(TypeSym::Name("Client".to_string())),
+                        Box::new(r#type),
+                    )
+                }
             }
         }
 
@@ -356,8 +369,8 @@ impl<'a> ParserState<'a> {
         Ok(Record { props })
     }
 
-    pub fn parse_record_type(&mut self) -> Result<Type> {
-        Ok(Type::Record(self.parse_record(RecordType)?.map(|p| p.item)))
+    pub fn parse_record_type(&mut self) -> Result<TypeSym> {
+        Ok(TypeSym::Rec(self.parse_record(RecordType)?.map(|p| p.item)))
     }
 
     pub fn parse_record_value(&mut self) -> Result<Tag<Val<Pos>, Pos>> {

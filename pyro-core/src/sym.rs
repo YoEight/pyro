@@ -1,6 +1,5 @@
+use crate::ast::Record;
 use std::fmt::{Display, Formatter};
-
-use crate::ast::Type;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Keyword {
@@ -37,6 +36,31 @@ impl Display for Keyword {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum TypeSym {
+    Name(String),
+    App(Box<TypeSym>, Box<TypeSym>),
+    Rec(Record<TypeSym>),
+    Unknown,
+}
+
+impl Display for TypeSym {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeSym::Name(n) => write!(f, "{}", n),
+            TypeSym::Unknown => write!(f, "_"),
+            TypeSym::App(c, inner) => {
+                write!(f, "(")?;
+                c.fmt(f)?;
+                write!(f, " ")?;
+                inner.fmt(f)?;
+                write!(f, ")")
+            }
+            TypeSym::Rec(rec) => rec.fmt(f),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Literal {
     /// An unsigned numeric literal
@@ -45,17 +69,6 @@ pub enum Literal {
     String(String),
     Char(char),
     Bool(bool),
-}
-
-impl Literal {
-    pub fn typematch(&self, r#type: &Type) -> bool {
-        match self {
-            Literal::Integer(_) => Type::integer().parent_type_of(r#type),
-            Literal::String(_) => Type::string().parent_type_of(r#type),
-            Literal::Char(_) => Type::char().parent_type_of(r#type),
-            Literal::Bool(_) => Type::bool().parent_type_of(r#type),
-        }
-    }
 }
 
 impl Display for Literal {
