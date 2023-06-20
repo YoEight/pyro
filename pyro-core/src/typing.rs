@@ -4,6 +4,18 @@ use crate::utils::generate_generic_type_name;
 use crate::{Ctx, STDLIB};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{write, Display, Formatter};
+#[derive(Clone)]
+pub enum TypePointer {
+    Ref(TypeRef),
+    Rec(Record<TypePointer>),
+    Fun(Box<TypePointer>, Box<TypePointer>),
+    App(Box<TypePointer>, Box<TypePointer>),
+}
+
+#[derive(Clone)]
+pub struct TypeInfo {
+    pub pointer: TypePointer,
+}
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum Type {
@@ -369,6 +381,47 @@ impl Knowledge {
         TypeRef {
             scope: scope.id(),
             name,
+        }
+    }
+
+    pub fn project_type(&self, id: &TypePointer) -> Type {
+        match id {
+            TypePointer::Ref(r) => self.dict(r).r#type.clone(),
+
+            TypePointer::Rec(rec) => {
+                let mut props = Vec::new();
+
+                for prop in &rec.props {
+                    props.push(Prop {
+                        label: prop.label.clone(),
+                        val: self.project_type(&prop.val),
+                    });
+                }
+
+                Type::Rec {
+                    props: Record { props },
+                }
+            }
+
+            TypePointer::Fun(lhs, rhs) => {
+                let lhs = self.project_type(lhs.as_ref());
+                let rhs = self.project_type(rhs.as_ref());
+
+                Type::Fun {
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                }
+            }
+
+            TypePointer::App(lhs, rhs) => {
+                let lhs = self.project_type(lhs.as_ref());
+                let rhs = self.project_type(rhs.as_ref());
+
+                Type::App {
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                }
+            }
         }
     }
 

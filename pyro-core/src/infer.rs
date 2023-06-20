@@ -1,21 +1,8 @@
 use crate::ast::{Abs, Decl, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val};
 use crate::context::Scope;
 use crate::sym::Literal;
-use crate::typing::{Dict, Knowledge, Type, TypeRef};
+use crate::typing::{Dict, Knowledge, Type, TypeInfo, TypePointer, TypeRef};
 use crate::Pos;
-
-#[derive(Clone)]
-pub enum TypePointer {
-    Ref(TypeRef),
-    Rec(Record<TypePointer>),
-    Fun(Box<TypePointer>, Box<TypePointer>),
-    App(Box<TypePointer>, Box<TypePointer>),
-}
-
-#[derive(Clone)]
-pub struct TypeInfo {
-    pointer: TypePointer,
-}
 
 pub fn infer_program<S: Scope>(
     know: &mut Knowledge,
@@ -324,15 +311,36 @@ fn infer_decl<S: Scope>(
 
             Decl::Channels(new_cs)
         }
-        Decl::Def(_) => {
-            todo!()
+
+        Decl::Def(defs) => {
+            let mut new_defs = Vec::new();
+
+            for def in defs {
+                let abs = infer_abs(know, scope, def.item.abs)?;
+                let projected = know.project_type(&abs.tag.pointer);
+                let mut client_dict = know.look_up_dict(scope, "Client").unwrap().clone();
+                client_dict.r#type = Type::client(projected);
+                know.declare(scope, &def.item.name, client_dict);
+            }
+
+            Decl::Def(new_defs)
         }
-        Decl::Type(_, _) => {
-            todo!()
+
+        Decl::Type(name, r#type) => {
+            // TODO - Not forget that stuff when I deprecate the old Type type.
+            let gen = know.new_generic(scope);
+            let dict = know.dict(&gen).clone();
+            know.declare(scope, &name, Dict::new(dict.r#type));
+            Decl::Type(name, r#type)
         }
     };
 
-    todo!()
+    Ok(Tag {
+        item: decl,
+        tag: TypeInfo {
+            pointer: TypePointer::Ref(know.process_type_ref()),
+        },
+    })
 }
 
 fn variable_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
