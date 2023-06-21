@@ -1,8 +1,8 @@
-use crate::ast::{Abs, Decl, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
 use crate::context::Scope;
 use crate::sym::Literal;
 use crate::typing::{Knowledge, TypeInfo, TypePointer};
-use crate::{type_not_found, variable_not_found, Pos};
+use crate::{type_not_found, variable_not_found, Dict, Pos};
 
 pub fn infer_program<S: Scope>(
     know: &mut Knowledge,
@@ -335,7 +335,7 @@ fn infer_pattern<S: Scope>(
     }
 }
 
-fn infer_decl<S: Scope>(
+pub fn infer_decl<S: Scope>(
     know: &mut Knowledge,
     scope: &S,
     decl: Tag<Decl<Pos>, Pos>,
@@ -370,20 +370,26 @@ fn infer_decl<S: Scope>(
         }
 
         Decl::Def(defs) => {
-            let new_defs = Vec::new();
+            let mut new_defs = Vec::new();
 
             for def in defs {
-                let abs = infer_abs(know, scope, def.item.abs)?;
-                let pointer = TypePointer::App(
-                    Box::new(TypePointer::Ref(know.client_type_ref())),
-                    Box::new(abs.tag.pointer.clone()),
-                );
+                let pointer = TypePointer::Ref(know.new_generic(scope));
+                let pending_type = know.project_type(&pointer);
+                know.declare(scope, &def.item.name, Dict::new(pending_type));
+                let new_scope = know.new_scope(scope);
+                let abs = infer_abs(know, &new_scope, def.item.abs)?;
 
-                know.declare(
-                    scope,
-                    &def.item.name,
-                    know.project_type_pointer_dict(&pointer),
-                );
+                new_defs.push(Tag {
+                    item: Def {
+                        name: def.item.name,
+                        abs,
+                    },
+                    tag: TypeInfo {
+                        pos,
+                        scope: scope.as_local(),
+                        pointer,
+                    },
+                })
             }
 
             Decl::Def(new_defs)

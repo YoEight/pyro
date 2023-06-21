@@ -233,6 +233,7 @@ struct ScopedTypes {
     name_gen: usize,
     ano_gen: usize,
     types: HashMap<String, Dict>,
+    used: HashSet<String>,
 }
 
 impl ScopedTypes {
@@ -665,6 +666,24 @@ impl Knowledge {
                 false
             }
         }
+    }
+
+    pub fn register_used_variable<S: Scope>(&mut self, scope: &S, name: &str) {
+        let types = self.inner.entry(scope.id()).or_default();
+
+        types.used.insert(name.to_string());
+    }
+
+    pub fn list_used_variables<S: Scope>(&self, scope: &S) -> HashSet<String> {
+        let mut set = HashSet::new();
+
+        for scope_id in scope.ancestors().iter().rev() {
+            if let Some(types) = self.inner.get(scope_id) {
+                set.extend(types.used.clone());
+            }
+        }
+
+        set
     }
 
     pub fn type_check_send<S: Scope>(&mut self, scope: &S, target: &Type, params: &Type) -> bool {

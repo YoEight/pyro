@@ -1,7 +1,6 @@
-use std::collections::HashSet;
-
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Var};
 use crate::ast::{Proc, Program, Tag, Val};
+use crate::context::LocalScope;
 use crate::typing::{Knowledge, Type, TypeInfo};
 use crate::{not_a_function, not_implement, record_label_not_found, type_error, Pos};
 
@@ -15,25 +14,28 @@ pub enum ValCtx {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ann {
     pub pos: Pos,
+    pub scope: LocalScope,
     pub r#type: Type,
-    pub used: HashSet<String>,
 }
 
 impl Ann {
-    pub fn with_type(r#type: Type, pos: Pos) -> Self {
+    pub fn with_type(r#type: Type, tag: TypeInfo) -> Self {
         Self {
-            pos,
+            pos: tag.pos,
             r#type,
-            used: Default::default(),
+            scope: tag.scope,
         }
     }
 }
 
-pub fn annotate_program(mut ctx: Knowledge, prog: Program<TypeInfo>) -> eyre::Result<Program<Ann>> {
+pub fn annotate_program(
+    ctx: &mut Knowledge,
+    prog: Program<TypeInfo>,
+) -> eyre::Result<Program<Ann>> {
     let mut annotated = Vec::new();
 
     for proc in prog.procs {
-        annotated.push(annotate_proc(&mut ctx, proc)?);
+        annotated.push(annotate_proc(ctx, proc)?);
     }
 
     Ok(Program { procs: annotated })
@@ -45,7 +47,6 @@ fn annotate_proc(
 ) -> eyre::Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
-            let ann = Ann::with_type(Type::process(), proc.tag.pos);
             let l = annotate_val(ctx, l)?;
             let r = annotate_val(ctx, r)?;
 
@@ -58,13 +59,12 @@ fn annotate_proc(
             }
 
             Ok(Tag {
-                tag: ann,
+                tag: Ann::with_type(Type::process(), proc.tag),
                 item: Proc::Output(l, r),
             })
         }
 
         Proc::Input(l, r) => {
-            let ann = Ann::with_type(Type::process(), proc.tag.pos);
             let l = annotate_val(ctx, l)?;
             let r = annotate_abs(ctx, r)?;
 
@@ -77,18 +77,18 @@ fn annotate_proc(
             }
 
             Ok(Tag {
-                tag: ann,
+                tag: Ann::with_type(Type::process(), proc.tag),
                 item: Proc::Input(l, r),
             })
         }
 
         Proc::Null => Ok(Tag {
             item: Proc::Null,
-            tag: Ann::with_type(Type::process(), proc.tag.pos),
+            tag: Ann::with_type(Type::process(), proc.tag),
         }),
 
         Proc::Parallel(ps) => {
-            let ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let ann = Ann::with_type(Type::process(), proc.tag);
             let mut new_ps = Vec::new();
 
             for p in ps {
@@ -109,7 +109,7 @@ fn annotate_proc(
 
             Ok(Tag {
                 item: Proc::Decl(d, Box::new(p)),
-                tag: Ann::with_type(Type::process(), proc.tag.pos),
+                tag: Ann::with_type(Type::process(), proc.tag),
             })
         }
 
@@ -121,7 +121,7 @@ fn annotate_proc(
                 return type_error(val.tag.pos, &bool_type, &val.tag.r#type);
             }
 
-            let ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let ann = Ann::with_type(Type::process(), proc.tag);
             let if_proc = annotate_proc(ctx, *if_proc)?;
             let else_proc = annotate_proc(ctx, *else_proc)?;
 
@@ -154,7 +154,7 @@ pub fn annotate_decl(
     ctx: &mut Knowledge,
     decl: Tag<Decl<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Decl<Ann>, Ann>> {
-    let ann = Ann::with_type(Type::process(), decl.tag.pos);
+    let ann = Ann::with_type(Type::process(), decl.tag.clone());
     let item = match decl.item {
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
@@ -164,7 +164,7 @@ pub fn annotate_decl(
 
                 chans.push(Tag {
                     item: decl_tag.item,
-                    tag: Ann::with_type(r#type, decl_tag.tag.pos),
+                    tag: Ann::with_type(r#type, decl_tag.tag),
                 });
             }
 
@@ -188,7 +188,7 @@ pub fn annotate_decl(
                         name: def_tag.item.name,
                         abs,
                     },
-                    tag: Ann::with_type(dict.r#type.clone(), def_tag.tag.pos),
+                    tag: Ann::with_type(dict.r#type.clone(), def_tag.tag),
                 });
             }
 
@@ -219,7 +219,7 @@ fn annotate_pattern(
 
             Ok(Tag {
                 item: Pat::Var(pat_tag.item),
-                tag: Ann::with_type(r#type, tag.tag.pos),
+                tag: Ann::with_type(r#type, tag.tag),
             })
         }
 
@@ -247,13 +247,13 @@ fn annotate_pattern(
 
             Ok(Tag {
                 item: Pat::Record(Record { props }),
-                tag: Ann::with_type(r#type, tag.tag.pos),
+                tag: Ann::with_type(r#type, tag.tag),
             })
         }
 
         Pat::Wildcard(t) => Ok(Tag {
             item: Pat::Wildcard(t.clone()),
-            tag: Ann::with_type(ctx.project_type(&tag.tag.pointer), tag.tag.pos),
+            tag: Ann::with_type(ctx.project_type(&tag.tag.pointer), tag.tag),
         }),
     }
 }
@@ -270,10 +270,7 @@ fn annotate_pat_var(
     let var = Var {
         id: pat_var.var.id,
         r#type: pat_var.var.r#type,
-        tag: Ann::with_type(
-            ctx.project_type(&pat_var.var.tag.pointer),
-            pat_var.var.tag.pos,
-        ),
+        tag: Ann::with_type(ctx.project_type(&pat_var.var.tag.pointer), pat_var.var.tag),
     };
 
     let tag = var.tag.clone();
@@ -293,7 +290,7 @@ pub fn annotate_val(
 
             Ok(Tag {
                 item: Val::Literal(l),
-                tag: Ann::with_type(r#type, lit.tag.pos),
+                tag: Ann::with_type(r#type, lit.tag),
             })
         }
 
@@ -301,6 +298,7 @@ pub fn annotate_val(
             let mut path = p.clone();
             path.reverse();
             let name = path.pop().unwrap();
+            ctx.register_used_variable(&lit.tag.scope, &name);
             let r#type = ctx.project_type(&lit.tag.pointer);
             let r#type = if let Type::Rec { props: mut rec } = r#type {
                 let mut temp = None;
@@ -328,7 +326,7 @@ pub fn annotate_val(
                 r#type
             };
 
-            let ann = Ann::with_type(r#type, lit.tag.pos);
+            let ann = Ann::with_type(r#type, lit.tag);
 
             Ok(Tag {
                 item: Val::Path(p),
@@ -358,7 +356,7 @@ pub fn annotate_val(
                 Type::Rec {
                     props: Record { props: types },
                 },
-                lit.tag.pos,
+                lit.tag,
             );
             Ok(Tag {
                 item: Val::Record(Record { props }),
@@ -372,7 +370,7 @@ pub fn annotate_val(
 
             Ok(Tag {
                 item: Val::AnoClient(abs),
-                tag: Ann::with_type(Type::client(r#type), lit.tag.pos),
+                tag: Ann::with_type(Type::client(r#type), lit.tag),
             })
         }
 
@@ -390,7 +388,7 @@ pub fn annotate_val(
                 return not_a_function(lit.tag.pos, &caller.tag.r#type);
             };
 
-            let ann = Ann::with_type(result_type, lit.tag.pos);
+            let ann = Ann::with_type(result_type, lit.tag);
 
             Ok(Tag {
                 item: Val::App(Box::new(caller), Box::new(param)),

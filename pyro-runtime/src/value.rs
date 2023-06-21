@@ -1,7 +1,8 @@
 use futures::future::BoxFuture;
 use pyro_core::annotate::Ann;
-use pyro_core::ast::{Abs, Record, Tag, Type};
+use pyro_core::ast::{Abs, Record, Tag};
 use pyro_core::sym::Literal;
+use pyro_core::Type;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};

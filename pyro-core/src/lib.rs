@@ -13,9 +13,9 @@ pub mod tokenizer;
 mod typing;
 mod utils;
 
-use crate::infer::infer_program;
-use crate::typing::{Knowledge, Type};
-pub use context::STDLIB;
+pub use crate::infer::{infer_decl, infer_program, infer_val};
+pub use crate::typing::{Dict, Knowledge, Type};
+pub use context::{Scope, STDLIB};
 
 /// Location in input string
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -48,11 +48,11 @@ pub fn tokenize(src: &str) -> eyre::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-pub fn parse(mut ctx: Knowledge, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
+pub fn parse(ctx: &mut Knowledge, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
     let tokens = tokenize(src)?;
     let parser = Parser::new(tokens.as_slice());
     let scope = ctx.new_scope(&STDLIB);
-    let inferred = infer_program(&mut ctx, &scope, parser.parse()?)?;
+    let inferred = infer_program(ctx, &scope, parser.parse()?)?;
     let program = annotate_program(ctx, inferred)?;
 
     Ok(program.procs)

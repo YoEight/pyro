@@ -2,8 +2,8 @@ use crate::env::Env;
 use crate::runtime::Runtime;
 use crate::value::{Channel, RuntimeValue, Symbol};
 use pyro_core::annotate::Ann;
-use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Type, Val};
-use pyro_core::{Ctx, STDLIB};
+use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
+use pyro_core::{Dict, Knowledge, Type, STDLIB};
 use tokio::sync::mpsc;
 
 struct Suspend {
@@ -29,13 +29,17 @@ impl EngineBuilder {
             stdout_handle: print_output,
         };
         let stdout = env.stdout();
+        let mut runtime = Runtime::new(env, Knowledge::standard());
 
-        let mut runtime = Runtime::new(env);
-
-        let mut ctx = Ctx::default();
         self.symbols.push(Symbol {
             name: "print".to_string(),
-            r#type: Type::client(Type::generic("a")),
+            r#type: Type::client(Type::ForAll {
+                binders: vec!["a".to_string()],
+                body: Box::new(Type::Qual {
+                    ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
+                    body: Box::new(Type::named("a")),
+                }),
+            }),
             value: RuntimeValue::Channel(Channel::Client(stdout)),
         });
 
@@ -59,25 +63,19 @@ impl EngineBuilder {
         self.symbols.push(Symbol::func_2("||", |a, b| a || b));
 
         for sym in self.symbols {
-            ctx.declare(&STDLIB, &sym.name, sym.r#type);
+            runtime
+                .knowledge
+                .declare(&STDLIB, &sym.name, Dict::new(sym.r#type));
             runtime.insert(sym.name, sym.value);
         }
 
         for (name, r#type) in self.types {
-            ctx.declare(&STDLIB, name, r#type);
+            runtime.knowledge.declare(&STDLIB, name, Dict::new(r#type));
         }
-
-        ctx.declare(&STDLIB, "String", Type::string());
-        ctx.declare(&STDLIB, "Bool", Type::bool());
-        ctx.declare(&STDLIB, "Integer", Type::integer());
-        ctx.declare(&STDLIB, "Char", Type::char());
-        ctx.declare(&STDLIB, "Client", Type::client_type());
-        ctx.declare(&STDLIB, "Server", Type::server_type());
-        ctx.declare(&STDLIB, "Channel", Type::channel_type());
 
         spawn_stdout_process(print_input);
 
-        Engine { runtime, ctx }
+        Engine { runtime }
     }
 
     pub fn add_symbol(mut self, sym: Symbol) -> Self {
@@ -94,7 +92,6 @@ impl EngineBuilder {
 #[derive(Clone)]
 pub struct Engine {
     runtime: Runtime,
-    ctx: Ctx,
 }
 
 impl Engine {
@@ -102,16 +99,16 @@ impl Engine {
         EngineBuilder::default()
     }
 
-    pub fn context(&mut self) -> &mut Ctx {
-        &mut self.ctx
+    pub fn context(&mut self) -> &mut Knowledge {
+        &mut self.runtime.knowledge
     }
 
     pub fn runtime(&mut self) -> &mut Runtime {
         &mut self.runtime
     }
 
-    pub async fn run(self, source_code: &str) -> eyre::Result<()> {
-        let progs = pyro_core::parse(self.ctx, source_code)?;
+    pub async fn run(mut self, source_code: &str) -> eyre::Result<()> {
+        let progs = pyro_core::parse(&mut self.runtime.knowledge, source_code)?;
         let mut work_items = Vec::new();
         let (sender, mut mailbox) = mpsc::unbounded_channel::<Msg>();
 
@@ -302,7 +299,7 @@ async fn execute_input(
         );
     };
 
-    runtime.keeps(abs.tag.used.keys());
+    runtime.keeps(&abs.tag.scope);
     let mut recv = receiver.lock().await;
     if let Some(value) = recv.recv().await {
         update_scope(runtime, &value, abs.item.pattern.item.clone());
@@ -322,7 +319,7 @@ fn update_scope(runtime: &mut Runtime, value: &RuntimeValue, pattern: Pat<Ann>) 
             runtime.insert(var.var.id, value.clone());
 
             if let Some(pattern) = var.pattern {
-                update_scope(runtime, value, *pattern.clone());
+                update_scope(runtime, value, pattern.item.clone());
             }
         }
 
