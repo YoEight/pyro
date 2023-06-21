@@ -98,6 +98,12 @@ pub struct Record<A> {
     pub props: Vec<Prop<A>>,
 }
 
+impl<A> Default for Record<A> {
+    fn default() -> Self {
+        Record { props: vec![] }
+    }
+}
+
 impl<A> Record<A> {
     pub fn empty() -> Self {
         Self { props: vec![] }

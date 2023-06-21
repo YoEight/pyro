@@ -28,7 +28,7 @@ impl Scope for STDLIB {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Eq, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct LocalScope {
     pub ancestors: Vec<u32>,
 }

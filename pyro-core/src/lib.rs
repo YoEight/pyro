@@ -87,7 +87,7 @@ fn record_label_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
 
 fn type_error<A>(pos: Pos, expected: &Type, got: &Type) -> eyre::Result<A> {
     eyre::bail!(
-        "{}:{}: Expected type {} but got {}",
+        "{}:{}: Expected type '{}' but got '{}'",
         pos.line,
         pos.column,
         expected,
@@ -97,7 +97,7 @@ fn type_error<A>(pos: Pos, expected: &Type, got: &Type) -> eyre::Result<A> {
 
 fn not_implement<A>(pos: Pos, r#type: &Type, constraint: &str) -> eyre::Result<A> {
     eyre::bail!(
-        "{}:{}: Type {} doesn't derive {}",
+        "{}:{}: Type '{}' doesn't derive '{}'",
         pos.line,
         pos.column,
         r#type,
@@ -107,7 +107,7 @@ fn not_implement<A>(pos: Pos, r#type: &Type, constraint: &str) -> eyre::Result<A
 
 fn not_a_function<A>(pos: Pos, r#type: &Type) -> eyre::Result<A> {
     eyre::bail!(
-        "{}:{}: Type {} is not a function",
+        "{}:{}: Type '{}' is not a function",
         pos.line,
         pos.column,
         r#type

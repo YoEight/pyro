@@ -2,7 +2,7 @@ use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, 
 use crate::context::Scope;
 use crate::sym::Literal;
 use crate::typing::{Knowledge, TypeInfo, TypePointer};
-use crate::{type_not_found, variable_not_found, Dict, Pos};
+use crate::{type_not_found, variable_not_found, Pos};
 
 pub fn infer_program<S: Scope>(
     know: &mut Knowledge,
@@ -28,12 +28,17 @@ pub fn infer_proc<S: Scope>(
             let target = infer_val(know, scope, target)?;
             let param = infer_val(know, scope, param)?;
 
+            // TODO - Improve the algo so the system infer that `Send` is a constraint for an higher
+            // kinded type.
+            know.suggest_constraint(&target.tag.pointer, "Send");
+            know.suggest_inner_type(scope, &target.tag.pointer, &param.tag.pointer);
+
             Ok(Tag {
                 item: Proc::Output(target, param),
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(know.process_type_ref()),
+                    pointer: know.process_type_ref(),
                 },
             })
         }
@@ -42,12 +47,17 @@ pub fn infer_proc<S: Scope>(
             let source = infer_val(know, scope, source)?;
             let event = infer_abs(know, scope, event)?;
 
+            // TODO - Improve the algo so the system infer that `Receive` is a constraint for an higher
+            // kinded type.
+            know.suggest_constraint(&source.tag.pointer, "Receive");
+            know.suggest_inner_type(scope, &source.tag.pointer, &event.tag.pointer);
+
             Ok(Tag {
                 item: Proc::Input(source, event),
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(know.process_type_ref()),
+                    pointer: know.process_type_ref(),
                 },
             })
         }
@@ -57,7 +67,7 @@ pub fn infer_proc<S: Scope>(
             tag: TypeInfo {
                 pos: proc.tag,
                 scope: scope.as_local(),
-                pointer: TypePointer::Ref(know.process_type_ref()),
+                pointer: know.process_type_ref(),
             },
         }),
 
@@ -73,7 +83,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(know.process_type_ref()),
+                    pointer: know.process_type_ref(),
                 },
             })
         }
@@ -87,7 +97,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(know.process_type_ref()),
+                    pointer: know.process_type_ref(),
                 },
             })
         }
@@ -102,7 +112,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(know.process_type_ref()),
+                    pointer: know.process_type_ref(),
                 },
             })
         }
@@ -116,7 +126,7 @@ pub fn infer_val<S: Scope>(
 ) -> eyre::Result<Tag<Val<TypeInfo>, TypeInfo>> {
     match val.item {
         Val::Literal(l) => {
-            let r#type = match &l {
+            let pointer = match &l {
                 Literal::Integer(_) => know.integer_type_ref(),
                 Literal::String(_) => know.string_type_ref(),
                 Literal::Char(_) => know.char_type_ref(),
@@ -128,7 +138,7 @@ pub fn infer_val<S: Scope>(
                 tag: TypeInfo {
                     pos: val.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(r#type),
+                    pointer,
                 },
             })
         }
@@ -138,8 +148,8 @@ pub fn infer_val<S: Scope>(
             // won't have path expressed as a vec.
             let name = ps.first().unwrap();
 
-            let r#type = if let Some(type_ref) = know.look_up(scope, name) {
-                type_ref
+            let pointer = if let Some(p) = know.look_up(scope, name) {
+                p
             } else {
                 return variable_not_found(val.tag, name);
             };
@@ -149,7 +159,7 @@ pub fn infer_val<S: Scope>(
                 tag: TypeInfo {
                     pos: val.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(r#type),
+                    pointer,
                 },
             })
         }
@@ -201,10 +211,7 @@ pub fn infer_val<S: Scope>(
 
         Val::AnoClient(abs) => {
             let abs = infer_abs(know, scope, abs)?;
-            let pointer = TypePointer::App(
-                Box::new(TypePointer::Ref(know.client_type_ref())),
-                Box::new(abs.tag.pointer.clone()),
-            );
+            let pointer = TypePointer::app(know.client_type_ref(), abs.tag.pointer.clone());
 
             Ok(Tag {
                 item: Val::AnoClient(abs),
@@ -235,7 +242,7 @@ pub fn infer_abs<S: Scope>(
         },
         tag: TypeInfo {
             pos: abs.tag,
-            scope: scope.as_local(),
+            scope: new_scope.as_local(),
             pointer,
         },
     })
@@ -253,13 +260,7 @@ fn infer_pattern<S: Scope>(
                 Err(n) => type_not_found(pat.tag, n.as_str())?,
             };
 
-            let pat_ref = know.declare(
-                scope,
-                &var.var.id,
-                know.project_type_pointer_dict(&projected_ref),
-            );
-
-            let pointer = TypePointer::Ref(pat_ref);
+            let pointer = know.declare_from_pointer(scope, &var.var.id, projected_ref);
 
             let pattern = if let Some(pattern) = var.pattern {
                 let pattern = infer_pattern(know, scope, *pattern)?;
@@ -350,18 +351,14 @@ pub fn infer_decl<S: Scope>(
                     Err(n) => type_not_found(dec.tag, n.as_str())?,
                 };
 
-                let type_ref = know.declare(
-                    scope,
-                    &dec.item.0,
-                    know.project_type_pointer_dict(&projected_pointer),
-                );
+                let pointer = know.declare_from_pointer(scope, &dec.item.0, projected_pointer);
 
                 new_cs.push(Tag {
                     item: dec.item,
                     tag: TypeInfo {
                         pos: decl.tag,
                         scope: scope.as_local(),
-                        pointer: TypePointer::Ref(type_ref),
+                        pointer,
                     },
                 })
             }
@@ -371,13 +368,12 @@ pub fn infer_decl<S: Scope>(
 
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
-
             for def in defs {
-                let pointer = TypePointer::Ref(know.new_generic(scope));
-                let pending_type = know.project_type(&pointer);
-                know.declare(scope, &def.item.name, Dict::new(pending_type));
-                let new_scope = know.new_scope(scope);
-                let abs = infer_abs(know, &new_scope, def.item.abs)?;
+                let projected_type =
+                    TypePointer::app(know.client_type_ref(), know.new_generic(scope));
+                let pointer = know.declare_from_pointer(scope, &def.item.name, projected_type);
+                let abs = infer_abs(know, scope, def.item.abs)?;
+                know.suggest_inner_type(scope, &pointer, &abs.tag.pointer);
 
                 new_defs.push(Tag {
                     item: Def {
@@ -401,7 +397,7 @@ pub fn infer_decl<S: Scope>(
                 Err(n) => type_not_found(decl.tag, n.as_str())?,
             };
 
-            know.declare(scope, &name, know.project_type_pointer_dict(&pointer));
+            know.declare_from_pointer(scope, &name, pointer);
             Decl::Type(name, r#type)
         }
     };
@@ -411,7 +407,7 @@ pub fn infer_decl<S: Scope>(
         tag: TypeInfo {
             pos,
             scope: scope.as_local(),
-            pointer: TypePointer::Ref(know.process_type_ref()),
+            pointer: know.process_type_ref(),
         },
     })
 }
