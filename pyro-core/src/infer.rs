@@ -1,7 +1,7 @@
 use crate::ast::{Abs, Decl, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
 use crate::context::Scope;
-use crate::sym::{Literal, TypeSym};
-use crate::typing::{Dict, Knowledge, Type, TypeInfo, TypePointer, TypeRef};
+use crate::sym::Literal;
+use crate::typing::{Knowledge, TypeInfo, TypePointer};
 use crate::{type_not_found, variable_not_found, Pos};
 
 pub fn infer_program<S: Scope>(
@@ -259,28 +259,32 @@ fn infer_pattern<S: Scope>(
                 know.project_type_pointer_dict(&projected_ref),
             );
 
-            let pattern = if let Some(pattern) = var.pattern {
-                // TODO - Fix the lexer so we get the proper tag at that level.
-                let node = Tag {
-                    item: *pattern,
-                    tag: pat.tag,
-                };
+            let pointer = TypePointer::Ref(pat_ref);
 
-                let pattern = infer_pattern(know, scope, node)?;
-                Some(Box::new(pattern.item))
+            let pattern = if let Some(pattern) = var.pattern {
+                let pattern = infer_pattern(know, scope, *pattern)?;
+                Some(Box::new(pattern))
             } else {
                 None
             };
 
             Ok(Tag {
                 item: Pat::Var(PatVar {
-                    var: var.var,
+                    var: Var {
+                        id: var.var.id,
+                        r#type: var.var.r#type,
+                        tag: TypeInfo {
+                            pos: pat.tag,
+                            scope: scope.as_local(),
+                            pointer: pointer.clone(),
+                        },
+                    },
                     pattern,
                 }),
                 tag: TypeInfo {
                     pos: pat.tag,
                     scope: scope.as_local(),
-                    pointer: TypePointer::Ref(pat_ref),
+                    pointer,
                 },
             })
         }
@@ -366,7 +370,7 @@ fn infer_decl<S: Scope>(
         }
 
         Decl::Def(defs) => {
-            let mut new_defs = Vec::new();
+            let new_defs = Vec::new();
 
             for def in defs {
                 let abs = infer_abs(know, scope, def.item.abs)?;

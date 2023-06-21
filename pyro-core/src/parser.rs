@@ -4,7 +4,6 @@ mod tests;
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
 use crate::sym::{Keyword, Punctuation, Sym, TypeSym};
 use crate::tokenizer::Token;
-use crate::utils::generate_generic_type_name;
 use crate::{Error, Pos, Result};
 use std::iter::Peekable;
 use std::slice::Iter;
@@ -130,7 +129,8 @@ impl<'a> ParserState<'a> {
         self.next_sym(Sym::Punctuation(expected))
     }
 
-    pub fn parse_variable(&mut self) -> Result<Var> {
+    pub fn parse_variable(&mut self) -> Result<Var<Pos>> {
+        let pos = self.pos();
         let token = self.shift();
         match &token.item {
             Sym::Id(name) => {
@@ -140,6 +140,7 @@ impl<'a> ParserState<'a> {
                 Ok(Var {
                     id: name.clone(),
                     r#type,
+                    tag: pos,
                 })
             }
 
@@ -505,7 +506,11 @@ impl<'a> ParserState<'a> {
 
                 let pattern = if self.next_sym(Sym::At) {
                     self.shift();
-                    Some(Box::new(self.parse_pat()?))
+                    let pat_pos = self.pos();
+                    Some(Box::new(Tag {
+                        item: self.parse_pat()?,
+                        tag: pat_pos,
+                    }))
                 } else {
                     None
                 };

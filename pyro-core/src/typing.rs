@@ -2,9 +2,9 @@ use crate::ast::{Prop, Record};
 use crate::context::{LocalScope, Scope};
 use crate::sym::{Literal, TypeSym};
 use crate::utils::generate_generic_type_name;
-use crate::{Ctx, Pos, STDLIB};
+use crate::{Pos, STDLIB};
 use std::collections::{HashMap, HashSet};
-use std::fmt::{write, Display, Formatter};
+use std::fmt::{Display, Formatter};
 
 #[derive(Clone)]
 pub enum TypePointer {
@@ -21,7 +21,7 @@ pub struct TypeInfo {
     pub pointer: TypePointer,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub enum Type {
     /// Universally quantified type.
     ForAll {
@@ -385,17 +385,23 @@ impl Knowledge {
         Some(self.dict(&type_ref))
     }
 
-    pub fn look_up_type_dict<S: Scope>(&self, scope: &S, r#type: &Type) -> &Dict {
+    pub fn look_up_type_dict<S: Scope>(&self, scope: &S, r#type: &Type) -> Option<&Dict> {
         match r#type {
-            Type::Var { name } => self.look_up_dict(scope, name.as_ref()).unwrap(),
-            _ => &mut Dict::new(r#type.clone()),
+            Type::Var { name } => self.look_up_dict(scope, name),
+            Type::App { lhs, .. } => self.look_up_type_dict(scope, lhs.as_ref()),
+            _ => None,
         }
     }
 
-    pub fn look_up_type_dict_mut<S: Scope>(&mut self, scope: &S, r#type: &Type) -> &mut Dict {
+    pub fn look_up_type_dict_mut<S: Scope>(
+        &mut self,
+        scope: &S,
+        r#type: &Type,
+    ) -> Option<&mut Dict> {
         match r#type {
-            Type::Var { name } => self.look_up_dict_mut(scope, name.as_ref()).unwrap(),
-            _ => &mut Dict::new(r#type.clone()),
+            Type::Var { name } => self.look_up_dict_mut(scope, name),
+            Type::App { lhs, .. } => self.look_up_type_dict_mut(scope, lhs.as_ref()),
+            _ => None,
         }
     }
 
@@ -449,9 +455,15 @@ impl Knowledge {
             }
 
             TypeSym::Rec(rec) => {
-                let rec = rec.traverse_result(|v| self.project_type_pointer(scope, &v))?;
+                let mut props = Vec::new();
+                for prop in &rec.props {
+                    props.push(Prop {
+                        label: prop.label.clone(),
+                        val: self.project_type_pointer(scope, &prop.val)?,
+                    });
+                }
 
-                Ok(TypePointer::Rec(rec))
+                Ok(TypePointer::Rec(Record { props }))
             }
 
             TypeSym::Unknown => Ok(TypePointer::Ref(self.new_generic(scope))),
@@ -520,7 +532,11 @@ impl Knowledge {
     }
 
     pub fn implements<S: Scope>(&self, scope: &S, r#type: &Type, constraint: &str) -> bool {
-        self.look_up_type_dict(scope, r#type).implements(constraint)
+        if let Some(dict) = self.look_up_type_dict(scope, r#type) {
+            return dict.implements(constraint);
+        }
+
+        false
     }
 
     pub fn new_scope<S: Scope>(&mut self, parent: &S) -> LocalScope {
@@ -536,18 +552,26 @@ impl Knowledge {
     pub fn param_matches<S: Scope>(&mut self, scope: &S, require: &Type, provided: &Type) -> bool {
         match require {
             Type::Var { name } => {
-                let require_dict = self.look_up_type_dict_mut(scope, require);
-                let provided_dict = self.look_up_type_dict_mut(scope, provided);
+                let provided_dict = self.look_up_type_dict(scope, provided).cloned();
+                let require_dict = self
+                    .look_up_type_dict_mut(scope, require)
+                    .expect("to be defined");
 
-                let matches = if is_generic_name(name) {
-                    require_dict.impls.is_subset(&provided_dict.impls)
+                if is_generic_name(name) {
+                    let matches = if let Some(provided_dict) = provided_dict {
+                        require_dict.impls.is_subset(&provided_dict.impls)
+                    } else {
+                        require_dict.impls.is_empty()
+                    };
+
+                    if matches {
+                        require_dict.r#type = provided.clone();
+                    }
+
+                    matches
                 } else {
-                    require_dict.r#type == provided_dict.r#type
-                };
-
-                require_dict.r#type = provided_dict.r#type.clone();
-
-                matches
+                    require == provided
+                }
             }
 
             Type::ForAll { binders, body } => {
@@ -567,7 +591,9 @@ impl Knowledge {
                             // part more flexible. Right now we don't support universally quantified higher
                             // kinded types.
                             (Type::Var { name: constr }, Type::Var { .. }) => {
-                                let var_dict = self.look_up_type_dict_mut(scope, rhs.as_ref());
+                                let var_dict = self
+                                    .look_up_type_dict_mut(scope, rhs.as_ref())
+                                    .expect("to be defined");
 
                                 var_dict.add(constr);
                             }
@@ -645,7 +671,10 @@ impl Knowledge {
         let inner_type = {
             let target_dict = self.look_up_type_dict_mut(scope, target);
 
-            if !target_dict.implements("Send") {
+            if !target_dict
+                .map(|d| d.implements("Send"))
+                .unwrap_or_default()
+            {
                 return false;
             }
 
@@ -668,7 +697,10 @@ impl Knowledge {
         let inner_type = {
             let target_dict = self.look_up_type_dict_mut(scope, target);
 
-            if !target_dict.implements("Receive") {
+            if !target_dict
+                .map(|d| d.implements("Receive"))
+                .unwrap_or_default()
+            {
                 return false;
             }
 

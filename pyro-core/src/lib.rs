@@ -13,8 +13,9 @@ pub mod tokenizer;
 mod typing;
 mod utils;
 
+use crate::infer::infer_program;
 use crate::typing::{Knowledge, Type};
-pub use context::{Ctx, STDLIB};
+pub use context::STDLIB;
 
 /// Location in input string
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -47,10 +48,12 @@ pub fn tokenize(src: &str) -> eyre::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-pub fn parse(ctx: Knowledge, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
+pub fn parse(mut ctx: Knowledge, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
     let tokens = tokenize(src)?;
     let parser = Parser::new(tokens.as_slice());
-    let program = annotate_program(ctx, parser.parse()?)?;
+    let scope = ctx.new_scope(&STDLIB);
+    let inferred = infer_program(&mut ctx, &scope, parser.parse()?)?;
+    let program = annotate_program(ctx, inferred)?;
 
     Ok(program.procs)
 }
@@ -105,7 +108,7 @@ fn not_implement<A>(pos: Pos, r#type: &Type, constraint: &str) -> eyre::Result<A
 fn not_a_function<A>(pos: Pos, r#type: &Type) -> eyre::Result<A> {
     eyre::bail!(
         "{}:{}: Type {} is not a function",
-        pos.lone,
+        pos.line,
         pos.column,
         r#type
     )

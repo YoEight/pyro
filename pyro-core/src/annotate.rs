@@ -1,16 +1,9 @@
-#[cfg(test)]
-mod tests;
-
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Var};
 use crate::ast::{Proc, Program, Tag, Val};
-use crate::context::{LocalScope, STDLIB};
-use crate::sym::Literal;
 use crate::typing::{Knowledge, Type, TypeInfo};
-use crate::{
-    not_a_function, not_implement, record_label_not_found, type_error, Ctx, Error, Pos, Result,
-};
+use crate::{not_a_function, not_implement, record_label_not_found, type_error, Pos};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum ValCtx {
@@ -36,7 +29,7 @@ impl Ann {
     }
 }
 
-pub fn annotate_program(mut ctx: Knowledge, prog: Program<TypeInfo>) -> Result<Program<Ann>> {
+pub fn annotate_program(mut ctx: Knowledge, prog: Program<TypeInfo>) -> eyre::Result<Program<Ann>> {
     let mut annotated = Vec::new();
 
     for proc in prog.procs {
@@ -52,9 +45,9 @@ fn annotate_proc(
 ) -> eyre::Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
-            let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
-            let mut l = annotate_val(ctx, l)?;
-            let mut r = annotate_val(ctx, r)?;
+            let ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let l = annotate_val(ctx, l)?;
+            let r = annotate_val(ctx, r)?;
 
             if !ctx.implements(&proc.tag.scope, &l.tag.r#type, "Send") {
                 return not_implement(proc.tag.pos, &l.tag.r#type, "Send");
@@ -95,7 +88,7 @@ fn annotate_proc(
         }),
 
         Proc::Parallel(ps) => {
-            let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let ann = Ann::with_type(Type::process(), proc.tag.pos);
             let mut new_ps = Vec::new();
 
             for p in ps {
@@ -128,7 +121,7 @@ fn annotate_proc(
                 return type_error(val.tag.pos, &bool_type, &val.tag.r#type);
             }
 
-            let mut ann = Ann::with_type(Type::process(), proc.tag.pos);
+            let ann = Ann::with_type(Type::process(), proc.tag.pos);
             let if_proc = annotate_proc(ctx, *if_proc)?;
             let else_proc = annotate_proc(ctx, *else_proc)?;
 
@@ -140,40 +133,10 @@ fn annotate_proc(
     }
 }
 
-fn update_val_type_info(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    node: &mut Tag<Val<Ann>, Ann>,
-    inferred_type: Type,
-) {
-    if let Val::Path(p) = &node.item {
-        update_path_type_info(ctx, scope, p, inferred_type.clone());
-    } else {
-        panic!("not implemented for {}", node.item);
-    }
-
-    node.tag.r#type = inferred_type;
-}
-
-fn update_path_type_info(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    path: &Vec<String>,
-    inferred_type: Type,
-) {
-    // TODO - I'm pretty sure this code won't work with record projection, for example x.y.
-    match path.as_slice() {
-        [ident] => {
-            ctx.update(scope, ident, inferred_type);
-        }
-        _ => todo!(),
-    }
-}
-
 fn annotate_abs(
     ctx: &mut Knowledge,
     tag: Tag<Abs<TypeInfo>, TypeInfo>,
-) -> Result<Tag<Abs<Ann>, Ann>> {
+) -> eyre::Result<Tag<Abs<Ann>, Ann>> {
     let pattern = annotate_pattern(ctx, tag.item.pattern)?;
     let proc = annotate_proc(ctx, *tag.item.proc)?;
     let ann = pattern.tag.clone();
@@ -185,40 +148,6 @@ fn annotate_abs(
         },
         tag: ann,
     })
-}
-
-fn update_pattern_type_info(ctx: &mut Ctx, scope: &LocalScope, node: &mut Tag<Pat<Ann>, Ann>) {
-    match &mut node.item {
-        Pat::Var(var) => {
-            update_pat_var_type_info(ctx, scope, var);
-            // FIXME - The way we propagate type information is horrendous, we need to find a beter
-            // way to prevent so weird mutable updates.
-            node.tag.r#type = var.var.r#type.clone();
-        }
-
-        Pat::Record(rec) => {
-            // FIXME - Jeez that function is ugly as hell!!!
-            node.tag.r#type = update_pat_rec_type_info(ctx, scope, rec);
-        }
-
-        Pat::Wildcard(_) => {}
-    }
-}
-
-fn update_pat_rec_type_info(
-    ctx: &mut Ctx,
-    scope: &LocalScope,
-    rec: &mut Record<Tag<Pat<Ann>, Ann>>,
-) -> Type {
-    rec.for_each(|node| update_pattern_type_info(ctx, scope, node));
-    let r#type = rec.clone().map(|node| node.tag.r#type);
-
-    Type::Record(r#type)
-}
-
-fn update_pat_var_type_info(ctx: &mut Ctx, scope: &LocalScope, pat_var: &mut PatVar<Ann>) {
-    let r#type = ctx.look_up(scope, &pat_var.var.id).unwrap();
-    pat_var.var.r#type = r#type.clone();
 }
 
 pub fn annotate_decl(
@@ -252,7 +181,7 @@ pub fn annotate_decl(
                     .look_up_dict_mut(&decl.tag.scope, &def_tag.item.name)
                     .unwrap();
 
-                *dict.r#type = Type::client(abs.tag.r#type.clone());
+                dict.r#type = Type::client(abs.tag.r#type.clone());
 
                 new_defs.push(Tag {
                     item: Def {
@@ -270,49 +199,6 @@ pub fn annotate_decl(
     Ok(Tag { item, tag: ann })
 }
 
-fn resolve_type(ctx: &Ctx, scope: &LocalScope, pos: Pos, r#type: Type) -> Result<Type> {
-    match r#type {
-        Type::Name {
-            name,
-            generic: false,
-            ..
-        } => {
-            if let Some(rn) = ctx.look_up(scope, &name) {
-                Ok(rn.clone())
-            } else {
-                Err(Error {
-                    pos,
-                    message: format!("Unknown type '{}'", name),
-                })
-            }
-        }
-
-        Type::Record(rec) => {
-            let rec = rec.traverse_result(|t| resolve_type(ctx, scope, pos, t))?;
-
-            Ok(Type::Record(rec))
-        }
-
-        Type::App(cons, end) => {
-            let cons = resolve_type(ctx, scope, pos, *cons)?;
-            let end = resolve_type(ctx, scope, pos, *end)?;
-
-            Ok(Type::App(Box::new(cons), Box::new(end)))
-        }
-
-        _ => Ok(r#type),
-    }
-}
-
-fn literal_type(lit: &Literal) -> Type {
-    match lit {
-        Literal::Integer(_) => Type::integer(),
-        Literal::String(_) => Type::string(),
-        Literal::Char(_) => Type::char(),
-        Literal::Bool(_) => Type::bool(),
-    }
-}
-
 fn annotate_pattern(
     ctx: &mut Knowledge,
     tag: Tag<Pat<TypeInfo>, TypeInfo>,
@@ -323,12 +209,12 @@ fn annotate_pattern(
 
             let r#type = if let Some(pat) = &pat_tag.item.pattern {
                 if !ctx.param_matches(&tag.tag.scope, &pat_tag.tag.r#type, &pat.tag.r#type) {
-                    return type_error(tag.tag.pos, pat_tag.tag.r#type, pat.tag.r#type);
+                    return type_error(tag.tag.pos, &pat_tag.tag.r#type, &pat.tag.r#type);
                 }
 
                 pat.tag.r#type.clone()
             } else {
-                &pat_tag.tag.r#type.clone()
+                pat_tag.tag.r#type.clone()
             };
 
             Ok(Tag {
@@ -355,7 +241,10 @@ fn annotate_pattern(
                 });
             }
 
-            let r#type = Type::Record(Record { props: props_type });
+            let r#type = Type::Rec {
+                props: Record { props: props_type },
+            };
+
             Ok(Tag {
                 item: Pat::Record(Record { props }),
                 tag: Ann::with_type(r#type, tag.tag.pos),
@@ -413,12 +302,12 @@ pub fn annotate_val(
             path.reverse();
             let name = path.pop().unwrap();
             let r#type = ctx.project_type(&lit.tag.pointer);
-            let r#type = if let Type::Record(mut rec) = r#type {
+            let r#type = if let Type::Rec { props: mut rec } = r#type {
                 let mut temp = None;
 
                 while let Some(frag) = path.pop() {
                     if let Some(prop) = rec.find_by_prop(&frag) {
-                        if let Type::Record(inner) = prop.val {
+                        if let Type::Rec { props: inner } = prop.val {
                             rec = inner;
                             continue;
                         }
@@ -433,13 +322,13 @@ pub fn annotate_val(
                 if let Some(r#type) = temp {
                     r#type
                 } else {
-                    Type::Record(rec)
+                    Type::Rec { props: rec }
                 }
             } else {
                 r#type
             };
 
-            let mut ann = Ann::with_type(r#type, lit.tag.pos);
+            let ann = Ann::with_type(r#type, lit.tag.pos);
 
             Ok(Tag {
                 item: Val::Path(p),
@@ -450,12 +339,9 @@ pub fn annotate_val(
         Val::Record(xs) => {
             let mut props = Vec::new();
             let mut types = Vec::new();
-            let mut used = HashMap::new();
 
             for prop in xs.props {
                 let val = annotate_val(ctx, prop.val)?;
-
-                used.extend(val.tag.used.clone());
 
                 types.push(Prop {
                     label: prop.label.clone(),
@@ -468,7 +354,12 @@ pub fn annotate_val(
                 });
             }
 
-            let mut ann = Ann::with_type(Type::Record(Record { props: types }), lit.tag.pos);
+            let ann = Ann::with_type(
+                Type::Rec {
+                    props: Record { props: types },
+                },
+                lit.tag.pos,
+            );
             Ok(Tag {
                 item: Val::Record(Record { props }),
                 tag: ann,

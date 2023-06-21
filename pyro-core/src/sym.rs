@@ -44,6 +44,15 @@ pub enum TypeSym {
     Unknown,
 }
 
+impl TypeSym {
+    pub fn channel(inner: TypeSym) -> Self {
+        TypeSym::App(
+            Box::new(TypeSym::Name("Client".to_string())),
+            Box::new(inner),
+        )
+    }
+}
+
 impl Display for TypeSym {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {

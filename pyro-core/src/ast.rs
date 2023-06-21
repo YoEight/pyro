@@ -1,6 +1,4 @@
 use crate::sym::{Literal, TypeSym};
-use crate::typing::Type;
-use crate::{Error, Pos};
 use std::future::Future;
 
 #[derive(Debug, PartialEq, Eq)]
