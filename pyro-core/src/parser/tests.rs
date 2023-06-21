@@ -56,7 +56,7 @@ fn test_parse_abs_with_input() {
                                 var: Var {
                                     id: "b".to_string(),
                                     r#type: TypeSym::Unknown,
-                                    tag: Pos { line: 0, column: 0 },
+                                    tag: Pos { line: 1, column: 7 },
                                 },
                                 pattern: None,
                             }),

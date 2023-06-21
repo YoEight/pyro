@@ -47,7 +47,7 @@ pub enum TypeSym {
 impl TypeSym {
     pub fn channel(inner: TypeSym) -> Self {
         TypeSym::App(
-            Box::new(TypeSym::Name("Client".to_string())),
+            Box::new(TypeSym::Name("Channel".to_string())),
             Box::new(inner),
         )
     }
