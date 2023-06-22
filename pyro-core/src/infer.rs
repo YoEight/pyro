@@ -38,7 +38,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: know.process_type_ref(),
+                    pointer: know.process_pointer(),
                 },
             })
         }
@@ -57,7 +57,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: know.process_type_ref(),
+                    pointer: know.process_pointer(),
                 },
             })
         }
@@ -67,7 +67,7 @@ pub fn infer_proc<S: Scope>(
             tag: TypeInfo {
                 pos: proc.tag,
                 scope: scope.as_local(),
-                pointer: know.process_type_ref(),
+                pointer: know.process_pointer(),
             },
         }),
 
@@ -83,7 +83,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: know.process_type_ref(),
+                    pointer: know.process_pointer(),
                 },
             })
         }
@@ -97,7 +97,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: know.process_type_ref(),
+                    pointer: know.process_pointer(),
                 },
             })
         }
@@ -112,7 +112,7 @@ pub fn infer_proc<S: Scope>(
                 tag: TypeInfo {
                     pos: proc.tag,
                     scope: scope.as_local(),
-                    pointer: know.process_type_ref(),
+                    pointer: know.process_pointer(),
                 },
             })
         }
@@ -127,10 +127,10 @@ pub fn infer_val<S: Scope>(
     match val.item {
         Val::Literal(l) => {
             let pointer = match &l {
-                Literal::Integer(_) => know.integer_type_ref(),
-                Literal::String(_) => know.string_type_ref(),
-                Literal::Char(_) => know.char_type_ref(),
-                Literal::Bool(_) => know.bool_type_ref(),
+                Literal::Integer(_) => know.integer_pointer(),
+                Literal::String(_) => know.string_pointer(),
+                Literal::Char(_) => know.char_pointer(),
+                Literal::Bool(_) => know.bool_pointer(),
             };
 
             Ok(Tag {
@@ -211,7 +211,7 @@ pub fn infer_val<S: Scope>(
 
         Val::AnoClient(abs) => {
             let abs = infer_abs(know, scope, abs)?;
-            let pointer = TypePointer::app(know.client_type_ref(), abs.tag.pointer.clone());
+            let pointer = TypePointer::app(know.client_pointer(), abs.tag.pointer.clone());
 
             Ok(Tag {
                 item: Val::AnoClient(abs),
@@ -370,7 +370,7 @@ pub fn infer_decl<S: Scope>(
             let mut new_defs = Vec::new();
             for def in defs {
                 let projected_type =
-                    TypePointer::app(know.client_type_ref(), know.new_generic(scope));
+                    TypePointer::app(know.client_pointer(), know.new_generic(scope));
                 let pointer = know.declare_from_pointer(scope, &def.item.name, projected_type);
                 let abs = infer_abs(know, scope, def.item.abs)?;
                 know.suggest_inner_type(scope, &pointer, &abs.tag.pointer);
@@ -407,7 +407,7 @@ pub fn infer_decl<S: Scope>(
         tag: TypeInfo {
             pos,
             scope: scope.as_local(),
-            pointer: know.process_type_ref(),
+            pointer: know.process_pointer(),
         },
     })
 }

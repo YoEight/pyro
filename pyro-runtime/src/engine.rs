@@ -65,12 +65,14 @@ impl EngineBuilder {
         for sym in self.symbols {
             runtime
                 .knowledge
-                .declare(&STDLIB, &sym.name, Dict::new(sym.r#type));
+                .declare_from_dict(&STDLIB, &sym.name, Dict::new(sym.r#type));
             runtime.insert(sym.name, sym.value);
         }
 
         for (name, r#type) in self.types {
-            runtime.knowledge.declare(&STDLIB, name, Dict::new(r#type));
+            runtime
+                .knowledge
+                .declare_from_dict(&STDLIB, name, Dict::new(r#type));
         }
 
         spawn_stdout_process(print_input);
