@@ -2,7 +2,7 @@ use crate::env::Env;
 use crate::value::{Channel, RuntimeValue};
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Decl, Def};
-use pyro_core::{Knowledge, Scope};
+use pyro_core::{Scope, UsedVariables};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -11,15 +11,15 @@ use tokio::sync::{mpsc, Mutex};
 pub struct Runtime {
     env: Env,
     pub(crate) variables: HashMap<String, RuntimeValue>,
-    pub(crate) knowledge: Knowledge,
+    pub(crate) used: UsedVariables,
 }
 
 impl Runtime {
-    pub fn new(env: Env, knowledge: Knowledge) -> Self {
+    pub fn new(env: Env) -> Self {
         Self {
             env,
             variables: Default::default(),
-            knowledge,
+            used: UsedVariables::default(),
         }
     }
 
@@ -64,7 +64,7 @@ impl Runtime {
     }
 
     pub fn keeps<S: Scope>(&mut self, scope: &S) {
-        let set = self.knowledge.list_used_variables(scope);
+        let set = self.used.list_used_variables(scope);
         self.variables.retain(|k, _| set.contains(k));
     }
 

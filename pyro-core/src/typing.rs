@@ -3,9 +3,10 @@ use crate::context::{LocalScope, Scope};
 use crate::sym::{Literal, TypeSym};
 use crate::utils::generate_generic_type_name;
 use crate::{Pos, STDLIB};
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::rc::Rc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypePointer {
@@ -18,6 +19,13 @@ pub enum TypePointer {
 }
 
 impl TypePointer {
+    pub fn as_type_ref(&self) -> &TypeRef {
+        if let TypePointer::Ref(type_ref) = self {
+            return type_ref;
+        }
+
+        panic!("Provided type pointer is not reference")
+    }
     pub fn app(a: TypePointer, b: TypePointer) -> Self {
         TypePointer::App(Box::new(a), Box::new(b))
     }
@@ -275,10 +283,12 @@ pub struct TypeRef {
     pub name: String,
 }
 
+type DictRef = Rc<RefCell<Dict>>;
+
 #[derive(Clone, Default)]
 struct ScopedTypes {
     name_gen: usize,
-    symbols: HashMap<String, Either<TypePointer, RefCell<Dict>>>,
+    symbols: HashMap<String, Either<TypePointer, DictRef>>,
     used: HashSet<String>,
 }
 
@@ -286,6 +296,25 @@ struct ScopedTypes {
 pub enum Either<A, B> {
     Left(A),
     Right(B),
+}
+
+#[derive(Default, Clone)]
+pub struct UsedVariables {
+    inner: HashMap<u32, HashSet<String>>,
+}
+
+impl UsedVariables {
+    pub fn list_used_variables<S: Scope>(&self, scope: &S) -> HashSet<String> {
+        let mut set = HashSet::new();
+
+        for scope_id in scope.ancestors().iter().rev() {
+            if let Some(used) = self.inner.get(scope_id) {
+                set.extend(used.clone());
+            }
+        }
+
+        set
+    }
 }
 
 #[derive(Clone)]
@@ -399,7 +428,7 @@ impl Knowledge {
         &mut self,
         scope: &S,
         name: impl AsRef<str>,
-        target: Either<TypePointer, Dict>,
+        target: Either<TypePointer, DictRef>,
     ) -> TypePointer {
         let type_ref = TypeRef {
             scope: scope.as_local(),
@@ -436,43 +465,7 @@ impl Knowledge {
         name: impl AsRef<str>,
         other: Dict,
     ) -> TypePointer {
-        self.declare(scope, name, Either::Right(other))
-    }
-
-    pub fn dict_mut(&mut self, id: &TypeRef) -> Option<&mut Dict> {
-        let type_ref = {
-            let mut current = id;
-
-            loop {
-                let types = if let Some(types) = self.dict_tables.get(&current.scope.id()) {
-                    types
-                } else {
-                    unreachable!()
-                };
-                match types.symbols.get(&current.name).unwrap() {
-                    Either::Left(next) => {
-                        let mut local = next;
-                        current = loop {
-                            match local {
-                                TypePointer::Ref(next) => break next,
-                                TypePointer::App(constr, _) => local = constr.as_ref(),
-                                _ => return None,
-                            }
-                        };
-                    }
-
-                    Either::Right(_) => break current.clone(),
-                }
-            }
-        };
-
-        let types = self.dict_tables.get_mut(&type_ref.scope.id())?;
-
-        if let Either::Right(dict) = types.symbols.get_mut(&type_ref.name)? {
-            return Some(dict);
-        }
-
-        None
+        self.declare(scope, name, Either::Right(Rc::new(RefCell::new(other))))
     }
 
     pub fn follow_link(&self, pointer: &TypePointer) -> TypePointer {
@@ -505,7 +498,7 @@ impl Knowledge {
             match self.follow_link(&current) {
                 TypePointer::Ref(type_ref) => {
                     let dict = self.dict(&type_ref).unwrap();
-                    return dict.implements(constraint);
+                    return dict.borrow().implements(constraint);
                 }
 
                 TypePointer::Rec(_) => return self.default_rec_dict.implements(constraint),
@@ -516,7 +509,7 @@ impl Knowledge {
         }
     }
 
-    pub fn dict(&self, id: &TypeRef) -> Option<&Dict> {
+    pub fn dict(&self, id: &TypeRef) -> Option<DictRef> {
         let mut current = id;
 
         loop {
@@ -533,7 +526,7 @@ impl Knowledge {
                     };
                 }
 
-                Either::Right(dict) => return Some(dict),
+                Either::Right(dict) => return Some(dict.clone()),
             }
         }
     }
@@ -573,7 +566,7 @@ impl Knowledge {
     {
         let types = self.dict_tables.entry(scope.id()).or_default();
         let id = types.name_gen;
-        let name = generate_generic_type_name(id);
+        let name = format!("'{}", generate_generic_type_name(id));
         types.name_gen += 1;
 
         // types.insert(&name, Dict::new(Type::named(name.clone())));
@@ -624,7 +617,7 @@ impl Knowledge {
 
     pub fn project_type(&self, id: &TypePointer) -> Dict {
         match self.follow_link(id) {
-            TypePointer::Ref(r) => self.dict(&r).cloned().unwrap(),
+            TypePointer::Ref(r) => self.dict(&r).unwrap().borrow().clone(),
 
             TypePointer::Rec(rec) => {
                 let mut props = Vec::new();
@@ -711,15 +704,33 @@ impl Knowledge {
 
     pub fn param_matches(&mut self, require: &TypePointer, provided: &TypePointer) -> bool {
         match require {
-            TypePointer::Ref(_) => {
+            TypePointer::Ref(type_ref) => {
                 let require_dict = self.project_type(require);
                 let provided_dict = self.project_type(provided);
 
                 if require_dict.is_generic() {
                     if provided_dict.is_generic() {
+                        let require_ref = self.dict(type_ref).unwrap();
+                        let mut require_ref = require_ref.borrow_mut();
+                        let provided_ref = self.dict(provided.as_type_ref()).unwrap();
+                        let mut provided_ref = provided_ref.borrow_mut();
+
+                        require_ref.impls.extend(provided_ref.impls.clone());
+                        provided_ref.impls.extend(require_ref.impls.clone());
+
                         true
                     } else {
-                        require_dict.impls.is_subset(&provided_dict.impls)
+                        if require_dict.impls.is_subset(&provided_dict.impls) {
+                            self.declare_from_pointer(
+                                &type_ref.scope,
+                                &type_ref.name,
+                                provided.clone(),
+                            );
+
+                            true
+                        } else {
+                            false
+                        }
                     }
                 } else {
                     require_dict.r#type == provided_dict.r#type
@@ -800,7 +811,8 @@ impl Knowledge {
         loop {
             match current {
                 TypePointer::Ref(p) => {
-                    if let Some(dict) = self.dict_mut(&p) {
+                    if let Some(dict) = self.dict(&p) {
+                        let mut dict = dict.borrow_mut();
                         if dict.is_generic() && !dict.implements(constraint) {
                             dict.add(constraint);
                         }
@@ -827,7 +839,8 @@ impl Knowledge {
             match current {
                 TypePointer::Ref(p) => {
                     let suggested_dict = self.simplify_dict(r#type);
-                    if let Some(dict) = self.dict_mut(p) {
+                    if let Some(dict) = self.dict(p) {
+                        let mut dict = dict.borrow_mut();
                         if dict.is_generic() {
                             if suggested_dict.is_generic() {
                                 dict.impls.extend(suggested_dict.impls);
@@ -863,10 +876,11 @@ impl Knowledge {
     ) {
         match pointer {
             TypePointer::Ref(p) => {
-                let dict = self.dict(p).unwrap().clone();
+                let dict = self.dict(p).unwrap();
+                let dict = dict.borrow();
 
                 if dict.is_generic() {
-                    let var = self.new_generic_with_constraints(scope, dict.impls);
+                    let var = self.new_generic_with_constraints(scope, dict.impls.clone());
                     self.dict_tables
                         .entry(p.scope.id())
                         .or_default()
@@ -899,21 +913,19 @@ impl Knowledge {
         types.used.insert(name.to_string());
     }
 
-    pub fn list_used_variables<S: Scope>(&self, scope: &S) -> HashSet<String> {
-        let mut set = HashSet::new();
+    pub fn build_used_variables_table(&self) -> UsedVariables {
+        let mut table = UsedVariables::default();
 
-        for scope_id in scope.ancestors().iter().rev() {
-            if let Some(types) = self.dict_tables.get(scope_id) {
-                set.extend(types.used.clone());
-            }
+        for (scope, types) in self.dict_tables.iter() {
+            table.inner.insert(*scope, types.used.clone());
         }
 
-        set
+        table
     }
 }
 
 fn is_generic_name(name: &str) -> bool {
-    name.chars().nth(0).unwrap().is_lowercase()
+    name.chars().nth(0).unwrap() == '\''
 }
 
 #[cfg(test)]

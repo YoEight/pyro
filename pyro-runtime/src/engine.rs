@@ -29,13 +29,14 @@ impl EngineBuilder {
             stdout_handle: print_output,
         };
         let stdout = env.stdout();
-        let mut runtime = Runtime::new(env, Knowledge::standard());
+        let mut knowledge = Knowledge::standard();
+        let mut runtime = Runtime::new(env);
         let local = LocalScope {
             ancestors: vec![0, 999999],
         };
         let var = TypePointer::Ref(TypeRef {
             scope: local.clone(),
-            name: "a".to_string(),
+            name: "'a".to_string(),
         });
         self.symbols.push(Symbol {
             name: "print".to_string(),
@@ -47,7 +48,7 @@ impl EngineBuilder {
                 TypePointer::ForAll(
                     false,
                     local.clone(),
-                    vec!["a".to_string()],
+                    vec!["'a".to_string()],
                     Box::new(TypePointer::Qual(
                         vec![TypePointer::app(
                             TypePointer::Ref(TypeRef {
@@ -83,21 +84,17 @@ impl EngineBuilder {
         self.symbols.push(Symbol::func_2("||", |a, b| a || b));
 
         for sym in self.symbols {
-            runtime
-                .knowledge
-                .declare_from_pointer(&STDLIB, &sym.name, sym.r#type);
+            knowledge.declare_from_pointer(&STDLIB, &sym.name, sym.r#type);
             runtime.insert(sym.name, sym.value);
         }
 
         for (name, r#type) in self.types {
-            runtime
-                .knowledge
-                .declare_from_dict(&STDLIB, name, Dict::new(r#type));
+            knowledge.declare_from_dict(&STDLIB, name, Dict::new(r#type));
         }
 
         spawn_stdout_process(print_input);
 
-        Engine { runtime }
+        Engine { runtime, knowledge }
     }
 
     pub fn add_symbol(mut self, sym: Symbol) -> Self {
@@ -114,6 +111,7 @@ impl EngineBuilder {
 #[derive(Clone)]
 pub struct Engine {
     runtime: Runtime,
+    knowledge: Knowledge,
 }
 
 impl Engine {
@@ -122,7 +120,7 @@ impl Engine {
     }
 
     pub fn context(&mut self) -> &mut Knowledge {
-        &mut self.runtime.knowledge
+        &mut self.knowledge
     }
 
     pub fn runtime(&mut self) -> &mut Runtime {
@@ -130,7 +128,8 @@ impl Engine {
     }
 
     pub async fn run(mut self, source_code: &str) -> eyre::Result<()> {
-        let progs = pyro_core::parse(&mut self.runtime.knowledge, source_code)?;
+        let progs = pyro_core::parse(&mut self.context(), source_code)?;
+        self.runtime.used = self.context().build_used_variables_table();
         let mut work_items = Vec::new();
         let (sender, mut mailbox) = mpsc::unbounded_channel::<Msg>();
 
