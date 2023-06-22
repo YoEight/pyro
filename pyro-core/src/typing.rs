@@ -260,14 +260,7 @@ pub struct TypeRef {
 #[derive(Clone, Default)]
 struct ScopedTypes {
     name_gen: usize,
-    types: HashMap<String, Dict>,
     used: HashSet<String>,
-}
-
-impl ScopedTypes {
-    fn insert(&mut self, name: impl AsRef<str>, dict: Dict) {
-        self.types.insert(name.as_ref().to_string(), dict);
-    }
 }
 
 #[derive(Clone)]
@@ -302,45 +295,50 @@ impl Knowledge {
             default_dict: Dict::new(Type::named("@@@@@@@")),
         };
 
-        let types = this.inner.entry(STDLIB.id()).or_default();
+        this.declare_from_dict(&STDLIB, "Show", Dict::new(Type::named("Show")));
+        this.declare_from_dict(&STDLIB, "Process", Dict::new(Type::named("Process")));
 
-        types.insert("Show", Dict::new(Type::named("Show")));
-        types.insert("Process", Dict::new(Type::process()));
-
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "Bool",
-            Dict::with_impls(Type::bool(), vec!["Show".to_string()]),
+            Dict::with_impls(Type::named("Bool"), vec!["Show".to_string()]),
         );
 
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "Integer",
-            Dict::with_impls(Type::integer(), vec!["Show".to_string()]),
+            Dict::with_impls(Type::named("Integer"), vec!["Show".to_string()]),
         );
 
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "String",
-            Dict::with_impls(Type::string(), vec!["Show".to_string()]),
+            Dict::with_impls(Type::named("String"), vec!["Show".to_string()]),
         );
 
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "Char",
-            Dict::with_impls(Type::char(), vec!["Show".to_string()]),
+            Dict::with_impls(Type::named("Char"), vec!["Show".to_string()]),
         );
 
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "Client",
             Dict::with_impls(Type::named("Client"), vec!["Send".to_string()]),
         );
 
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "Server",
             Dict::with_impls(Type::named("Server"), vec!["Receive".to_string()]),
         );
 
-        types.insert(
+        this.declare_from_dict(
+            &STDLIB,
             "Channel",
             Dict::with_impls(
-                Type::named("Channel"),
+                Type::named("Send"),
                 vec!["Send".to_string(), "Receive".to_string()],
             ),
         );
@@ -485,24 +483,6 @@ impl Knowledge {
         }
 
         None
-        // for (height, scope_id) in scope.ancestors().iter().rev().enumerate() {
-        //     if let Some(types) = self.inner.get(&scope_id) {
-        //         if types.types.contains_key(name) {
-        //             let mut ancestors = scope.ancestors().to_vec();
-        //
-        //             for _ in 0..height {
-        //                 ancestors.pop();
-        //             }
-        //
-        //             return Some(TypeRef {
-        //                 scope: LocalScope { ancestors },
-        //                 name: name.to_string(),
-        //             });
-        //         }
-        //     }
-        // }
-        //
-        // None
     }
 
     pub fn new_generic<S: Scope>(&mut self, scope: &S) -> TypePointer {
