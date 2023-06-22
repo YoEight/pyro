@@ -453,6 +453,30 @@ impl Knowledge {
         None
     }
 
+    pub fn follow_link(&self, pointer: &TypePointer) -> TypePointer {
+        let mut current = pointer;
+
+        loop {
+            let type_ref = match current {
+                TypePointer::Ref(r) => r,
+                _ => return current.clone(),
+            };
+
+            let types = self.dict_tables.get(&type_ref.scope.id()).unwrap();
+            match types.symbols.get(&type_ref.name).unwrap() {
+                Either::Left(next) => {
+                    current = if let TypePointer::Ref(_) = next {
+                        next
+                    } else {
+                        return next.clone();
+                    };
+                }
+
+                Either::Right(_) => return TypePointer::Ref(type_ref.clone()),
+            }
+        }
+    }
+
     pub fn dict(&self, id: &TypeRef) -> Option<&Dict> {
         let mut current = id;
 

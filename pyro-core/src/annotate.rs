@@ -399,7 +399,8 @@ pub fn annotate_val(
             let caller = annotate_val(ctx, *caller)?;
             let param = annotate_val(ctx, *param)?;
 
-            let result_type = if let TypePointer::Fun(lhs, rhs) = &caller_pointer {
+            let result_type = if let TypePointer::Fun(lhs, rhs) = &ctx.follow_link(&caller_pointer)
+            {
                 if !ctx.param_matches(lhs.as_ref(), &param_pointer) {
                     let expectation = ctx.project_type(lhs.as_ref());
                     return type_error(lit.tag.pos, &expectation.r#type, &param.tag.r#type.r#type);
