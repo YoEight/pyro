@@ -260,6 +260,7 @@ pub struct TypeRef {
 #[derive(Clone, Default)]
 struct ScopedTypes {
     name_gen: usize,
+    symbols: HashMap<String, Either<TypePointer, Dict>>,
     used: HashSet<String>,
 }
 
@@ -272,8 +273,7 @@ pub enum Either<A, B> {
 #[derive(Clone)]
 pub struct Knowledge {
     scope_gen: u32,
-    inner: HashMap<u32, ScopedTypes>,
-    dict_tables: HashMap<TypeRef, Either<TypePointer, Dict>>,
+    dict_tables: HashMap<u32, ScopedTypes>,
     pub(crate) default_rec_dict: Dict,
     pub(crate) default_fun_dict: Dict,
     pub(crate) default_dict: Dict,
@@ -283,7 +283,6 @@ impl Knowledge {
     pub fn standard() -> Self {
         let mut this = Knowledge {
             scope_gen: 0,
-            inner: Default::default(),
             dict_tables: Default::default(),
             default_rec_dict: Dict::new(Type::Rec {
                 props: Record::default(),
@@ -384,14 +383,13 @@ impl Knowledge {
         name: impl AsRef<str>,
         target: Either<TypePointer, Dict>,
     ) -> TypePointer {
-        // let types = self.inner.entry(scope.id()).or_default();
         let type_ref = TypeRef {
             scope: scope.as_local(),
             name: name.as_ref().to_string(),
         };
 
-        self.dict_tables.insert(type_ref.clone(), target);
-        // types.insert(name.as_ref().to_string(), dict);
+        let types = self.dict_tables.entry(scope.id()).or_default();
+        types.symbols.insert(name.as_ref().to_string(), target);
 
         TypePointer::Ref(type_ref)
     }
@@ -426,8 +424,10 @@ impl Knowledge {
     pub fn dict_mut(&mut self, id: &TypeRef) -> Option<&mut Dict> {
         let type_ref = {
             let mut current = id;
+
             loop {
-                match self.dict_tables.get(current).unwrap() {
+                let types = self.dict_tables.get(&current.scope.id()).unwrap();
+                match types.symbols.get(&current.name).unwrap() {
                     Either::Left(next) => {
                         let mut local = next;
                         current = loop {
@@ -444,18 +444,21 @@ impl Knowledge {
             }
         };
 
-        if let Some(Either::Right(dict)) = self.dict_tables.get_mut(&type_ref) {
+        let types = self.dict_tables.get_mut(&type_ref.scope.id())?;
+
+        if let Either::Right(dict) = types.symbols.get_mut(&type_ref.name)? {
             return Some(dict);
-        } else {
-            unreachable!()
         }
+
+        None
     }
 
     pub fn dict(&self, id: &TypeRef) -> Option<&Dict> {
         let mut current = id;
 
         loop {
-            match self.dict_tables.get(current).unwrap() {
+            let types = self.dict_tables.get(&current.scope.id()).unwrap();
+            match types.symbols.get(&current.name).unwrap() {
                 Either::Left(next) => {
                     let mut local = next;
                     current = loop {
@@ -473,13 +476,21 @@ impl Knowledge {
     }
 
     pub fn look_up<S: Scope>(&self, scope: &S, name: &str) -> Option<TypePointer> {
-        let type_ref = TypeRef {
-            scope: scope.as_local(),
-            name: name.to_string(),
-        };
+        for (height, scope_id) in scope.ancestors().iter().rev().enumerate() {
+            if let Some(types) = self.dict_tables.get(&scope_id) {
+                if types.symbols.contains_key(name) {
+                    let mut ancestors = scope.ancestors().to_vec();
 
-        if self.dict_tables.contains_key(&type_ref) {
-            return Some(TypePointer::Ref(type_ref));
+                    for _ in 0..height {
+                        ancestors.pop();
+                    }
+
+                    return Some(TypePointer::Ref(TypeRef {
+                        scope: LocalScope { ancestors },
+                        name: name.to_string(),
+                    }));
+                }
+            }
         }
 
         None
@@ -493,7 +504,7 @@ impl Knowledge {
     where
         I: IntoIterator<Item = String>,
     {
-        let types = self.inner.entry(scope.id()).or_default();
+        let types = self.dict_tables.entry(scope.id()).or_default();
         let id = types.name_gen;
         let name = generate_generic_type_name(id);
         types.name_gen += 1;
@@ -719,7 +730,10 @@ impl Knowledge {
                                 dict.impls.extend(suggested_dict.impls);
                             } else {
                                 self.dict_tables
-                                    .insert(p.clone(), Either::Left(r#type.clone()));
+                                    .entry(p.scope.id())
+                                    .or_default()
+                                    .symbols
+                                    .insert(p.name.clone(), Either::Left(r#type.clone()));
                             }
                         }
                     }
@@ -750,10 +764,14 @@ impl Knowledge {
 
                 if dict.is_generic() {
                     let var = self.new_generic_with_constraints(scope, dict.impls);
-                    self.dict_tables.insert(
-                        p.clone(),
-                        Either::Left(TypePointer::app(var, r#type.clone())),
-                    );
+                    self.dict_tables
+                        .entry(p.scope.id())
+                        .or_default()
+                        .symbols
+                        .insert(
+                            p.name.clone(),
+                            Either::Left(TypePointer::app(var, r#type.clone())),
+                        );
                 }
             }
 
@@ -773,7 +791,7 @@ impl Knowledge {
     }
 
     pub fn register_used_variable<S: Scope>(&mut self, scope: &S, name: &str) {
-        let types = self.inner.entry(scope.id()).or_default();
+        let types = self.dict_tables.entry(scope.id()).or_default();
 
         types.used.insert(name.to_string());
     }
@@ -782,7 +800,7 @@ impl Knowledge {
         let mut set = HashSet::new();
 
         for scope_id in scope.ancestors().iter().rev() {
-            if let Some(types) = self.inner.get(scope_id) {
+            if let Some(types) = self.dict_tables.get(scope_id) {
                 set.extend(types.used.clone());
             }
         }
