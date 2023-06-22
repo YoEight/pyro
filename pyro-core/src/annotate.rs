@@ -2,7 +2,7 @@ use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Var};
 use crate::ast::{Proc, Program, Tag, Val};
 use crate::context::LocalScope;
 use crate::typing::{Knowledge, Type, TypeInfo, TypePointer};
-use crate::{not_a_function, not_implement, record_label_not_found, type_error, Dict, Pos};
+use crate::{not_a_function, not_implement, record_label_not_found, type_error, Pos};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 pub enum ValCtx {
@@ -15,11 +15,11 @@ pub enum ValCtx {
 pub struct Ann {
     pub pos: Pos,
     pub scope: LocalScope,
-    pub r#type: Dict,
+    pub r#type: TypePointer,
 }
 
 impl Ann {
-    pub fn with_type(r#type: Dict, tag: TypeInfo) -> Self {
+    pub fn with_type(r#type: TypePointer, tag: TypeInfo) -> Self {
         Self {
             pos: tag.pos,
             r#type,
@@ -47,62 +47,74 @@ fn annotate_proc(
 ) -> eyre::Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
         Proc::Output(l, r) => {
-            let l_pointer = l.tag.pointer.clone();
-            let r_pointer = r.tag.pointer.clone();
             let l = annotate_val(ctx, l)?;
             let r = annotate_val(ctx, r)?;
 
-            if !l.tag.r#type.implements("Send") {
-                return not_implement(proc.tag.pos, &l.tag.r#type.r#type, "Send");
+            if !ctx.implements(&l.tag.r#type, "Send") {
+                return not_implement(
+                    proc.tag.pos,
+                    &ctx.project_type(&l.tag.r#type).r#type,
+                    "Send",
+                );
             }
 
-            if let TypePointer::App(_, inner) = l_pointer {
-                if !ctx.param_matches(inner.as_ref(), &r_pointer) {
+            if let TypePointer::App(_, inner) = ctx.follow_link(&l.tag.r#type) {
+                if !ctx.param_matches(inner.as_ref(), &r.tag.r#type) {
                     let inner = ctx.project_type(inner.as_ref());
-                    return type_error(proc.tag.pos, &inner.r#type, &r.tag.r#type.r#type);
+                    return type_error(
+                        proc.tag.pos,
+                        &inner.r#type,
+                        &ctx.project_type(&r.tag.r#type).r#type,
+                    );
                 }
             } else {
                 unreachable!()
             }
 
             Ok(Tag {
-                tag: Ann::with_type(ctx.default_dict.clone(), proc.tag),
+                tag: Ann::with_type(ctx.process_pointer(), proc.tag),
                 item: Proc::Output(l, r),
             })
         }
 
         Proc::Input(l, r) => {
-            let l_pointer = l.tag.pointer.clone();
-            let r_pointer = r.tag.pointer.clone();
             let l = annotate_val(ctx, l)?;
             let r = annotate_abs(ctx, r)?;
 
-            if !l.tag.r#type.implements("Receive") {
-                return not_implement(proc.tag.pos, &l.tag.r#type.r#type, "Receive");
+            if !ctx.implements(&l.tag.r#type, "Receive") {
+                return not_implement(
+                    proc.tag.pos,
+                    &ctx.project_type(&l.tag.r#type).r#type,
+                    "Receive",
+                );
             }
 
-            if let TypePointer::App(_, inner) = l_pointer {
-                if !ctx.param_matches(inner.as_ref(), &r_pointer) {
+            if let TypePointer::App(_, inner) = ctx.follow_link(&l.tag.r#type) {
+                if !ctx.param_matches(inner.as_ref(), &r.tag.r#type) {
                     let inner = ctx.project_type(inner.as_ref());
-                    return type_error(proc.tag.pos, &inner.r#type, &r.tag.r#type.r#type);
+                    return type_error(
+                        proc.tag.pos,
+                        &inner.r#type,
+                        &ctx.project_type(&r.tag.r#type).r#type,
+                    );
                 }
             } else {
                 unreachable!()
             }
 
             Ok(Tag {
-                tag: Ann::with_type(ctx.default_dict.clone(), proc.tag),
+                tag: Ann::with_type(ctx.process_pointer(), proc.tag),
                 item: Proc::Input(l, r),
             })
         }
 
         Proc::Null => Ok(Tag {
             item: Proc::Null,
-            tag: Ann::with_type(ctx.default_dict.clone(), proc.tag),
+            tag: Ann::with_type(ctx.process_pointer(), proc.tag),
         }),
 
         Proc::Parallel(ps) => {
-            let ann = Ann::with_type(ctx.default_dict.clone(), proc.tag);
+            let ann = Ann::with_type(ctx.process_pointer(), proc.tag);
             let mut new_ps = Vec::new();
 
             for p in ps {
@@ -123,19 +135,22 @@ fn annotate_proc(
 
             Ok(Tag {
                 item: Proc::Decl(d, Box::new(p)),
-                tag: Ann::with_type(ctx.default_dict.clone(), proc.tag),
+                tag: Ann::with_type(ctx.process_pointer(), proc.tag),
             })
         }
 
         Proc::Cond(val, if_proc, else_proc) => {
-            let val_pointer = val.tag.pointer.clone();
             let val = annotate_val(ctx, val)?;
 
-            if !ctx.param_matches(&ctx.bool_pointer(), &val_pointer) {
-                return type_error(val.tag.pos, &Type::bool(), &val.tag.r#type.r#type);
+            if !ctx.param_matches(&ctx.bool_pointer(), &val.tag.r#type) {
+                return type_error(
+                    val.tag.pos,
+                    &Type::bool(),
+                    &ctx.project_type(&val.tag.r#type).r#type,
+                );
             }
 
-            let ann = Ann::with_type(ctx.default_dict.clone(), proc.tag);
+            let ann = Ann::with_type(ctx.process_pointer(), proc.tag);
             let if_proc = annotate_proc(ctx, *if_proc)?;
             let else_proc = annotate_proc(ctx, *else_proc)?;
 
@@ -168,17 +183,15 @@ pub fn annotate_decl(
     ctx: &mut Knowledge,
     decl: Tag<Decl<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Decl<Ann>, Ann>> {
-    let ann = Ann::with_type(ctx.default_dict.clone(), decl.tag.clone());
+    let ann = Ann::with_type(ctx.process_pointer(), decl.tag.clone());
     let item = match decl.item {
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
 
             for decl_tag in cs {
-                let r#type = ctx.project_type(&decl_tag.tag.pointer);
-
                 chans.push(Tag {
                     item: decl_tag.item,
-                    tag: Ann::with_type(r#type, decl_tag.tag),
+                    tag: Ann::with_type(decl_tag.tag.pointer.clone(), decl_tag.tag),
                 });
             }
 
@@ -191,13 +204,12 @@ pub fn annotate_decl(
             let mut new_defs = Vec::new();
             for def_tag in defs {
                 let abs = annotate_abs(ctx, def_tag.item.abs)?;
-                let dict = ctx.project_type(&def_tag.tag.pointer);
                 new_defs.push(Tag {
                     item: Def {
                         name: def_tag.item.name,
                         abs,
                     },
-                    tag: Ann::with_type(dict, def_tag.tag),
+                    tag: Ann::with_type(def_tag.tag.pointer.clone(), def_tag.tag),
                 });
             }
 
@@ -225,8 +237,8 @@ fn annotate_pattern(
                 if !ctx.param_matches(&pat_tag_pointer, &pat.tag.pointer) {
                     return type_error(
                         tag.tag.pos,
-                        &pat_tag.tag.r#type.r#type,
-                        &pat_dict.as_ref().tag.r#type.r#type,
+                        &ctx.project_type(&pat_tag.tag.r#type).r#type,
+                        &ctx.project_type(&pat_dict.as_ref().tag.r#type).r#type,
                     );
                 }
 
@@ -250,7 +262,7 @@ fn annotate_pattern(
 
                 props_type.push(Prop {
                     label: prop.label.clone(),
-                    val: val.tag.r#type.r#type.clone(),
+                    val: val.tag.r#type.clone(),
                 });
 
                 props.push(Prop {
@@ -259,22 +271,17 @@ fn annotate_pattern(
                 });
             }
 
-            let r#type = Type::Rec {
-                props: Record { props: props_type },
-            };
-
-            let mut dict = ctx.default_rec_dict.clone();
-            dict.r#type = r#type;
+            let r#type = TypePointer::rec(props_type);
 
             Ok(Tag {
                 item: Pat::Record(Record { props }),
-                tag: Ann::with_type(dict, tag.tag),
+                tag: Ann::with_type(r#type, tag.tag),
             })
         }
 
         Pat::Wildcard(t) => Ok(Tag {
             item: Pat::Wildcard(t.clone()),
-            tag: Ann::with_type(ctx.project_type(&tag.tag.pointer), tag.tag),
+            tag: Ann::with_type(tag.tag.pointer.clone(), tag.tag),
         }),
     }
 }
@@ -291,7 +298,7 @@ fn annotate_pat_var(
     let var = Var {
         id: pat_var.var.id,
         r#type: pat_var.var.r#type,
-        tag: Ann::with_type(ctx.project_type(&pat_var.var.tag.pointer), pat_var.var.tag),
+        tag: Ann::with_type(pat_var.var.tag.pointer.clone(), pat_var.var.tag),
     };
 
     let tag = var.tag.clone();
@@ -308,7 +315,7 @@ pub fn annotate_val(
     match lit.item {
         Val::Literal(l) => Ok(Tag {
             item: Val::Literal(l),
-            tag: Ann::with_type(ctx.project_type(&lit.tag.pointer), lit.tag),
+            tag: Ann::with_type(lit.tag.pointer.clone(), lit.tag),
         }),
 
         Val::Path(p) => {
@@ -316,13 +323,12 @@ pub fn annotate_val(
             path.reverse();
             let name = path.pop().unwrap();
             ctx.register_used_variable(&lit.tag.scope, &name);
-            let mut dict = ctx.project_type(&lit.tag.pointer);
-            let dict = if let Type::Rec { props: mut rec } = dict.r#type.clone() {
+            let dict = if let TypePointer::Rec(mut rec) = lit.tag.pointer.clone() {
                 let mut temp = None;
 
                 while let Some(frag) = path.pop() {
                     if let Some(prop) = rec.find_by_prop(&frag) {
-                        if let Type::Rec { props: inner } = prop.val {
+                        if let TypePointer::Rec(inner) = prop.val {
                             rec = inner;
                             continue;
                         }
@@ -335,13 +341,12 @@ pub fn annotate_val(
                 }
 
                 if let Some(r#type) = temp {
-                    Dict::new(r#type)
+                    r#type
                 } else {
-                    dict.r#type = Type::Rec { props: rec };
-                    dict
+                    TypePointer::Rec(rec)
                 }
             } else {
-                dict
+                lit.tag.pointer.clone()
             };
 
             // FIXME - This code is wrong but doesn't seem to be needed.
@@ -362,7 +367,7 @@ pub fn annotate_val(
 
                 types.push(Prop {
                     label: prop.label.clone(),
-                    val: val.tag.r#type.r#type.clone(),
+                    val: val.tag.r#type.clone(),
                 });
 
                 props.push(Prop {
@@ -371,12 +376,7 @@ pub fn annotate_val(
                 });
             }
 
-            let mut dict = ctx.default_rec_dict.clone();
-            dict.r#type = Type::Rec {
-                props: Record { props: types },
-            };
-
-            let ann = Ann::with_type(dict, lit.tag);
+            let ann = Ann::with_type(TypePointer::rec(types), lit.tag);
             Ok(Tag {
                 item: Val::Record(Record { props }),
                 tag: ann,
@@ -394,21 +394,24 @@ pub fn annotate_val(
         }
 
         Val::App(caller, param) => {
-            let caller_pointer = caller.tag.pointer.clone();
-            let param_pointer = param.tag.pointer.clone();
             let caller = annotate_val(ctx, *caller)?;
             let param = annotate_val(ctx, *param)?;
 
-            let result_type = if let TypePointer::Fun(lhs, rhs) = &ctx.follow_link(&caller_pointer)
+            let result_type = if let TypePointer::Fun(expect, result) =
+                ctx.follow_link(&caller.tag.r#type)
             {
-                if !ctx.param_matches(lhs.as_ref(), &param_pointer) {
-                    let expectation = ctx.project_type(lhs.as_ref());
-                    return type_error(lit.tag.pos, &expectation.r#type, &param.tag.r#type.r#type);
+                if !ctx.param_matches(expect.as_ref(), &param.tag.r#type) {
+                    let expectation = ctx.project_type(expect.as_ref());
+                    return type_error(
+                        lit.tag.pos,
+                        &expectation.r#type,
+                        &ctx.project_type(&param.tag.r#type).r#type,
+                    );
                 }
 
-                ctx.project_type(rhs.as_ref())
+                result.as_ref().clone()
             } else {
-                return not_a_function(lit.tag.pos, &caller.tag.r#type.r#type);
+                return not_a_function(lit.tag.pos, &ctx.project_type(&caller.tag.r#type).r#type);
             };
 
             let ann = Ann::with_type(result_type, lit.tag);

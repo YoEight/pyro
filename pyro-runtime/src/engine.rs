@@ -3,7 +3,7 @@ use crate::runtime::Runtime;
 use crate::value::{Channel, RuntimeValue, Symbol};
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Dict, Knowledge, Type, STDLIB};
+use pyro_core::{Dict, Knowledge, LocalScope, Type, TypePointer, TypeRef, STDLIB};
 use tokio::sync::mpsc;
 
 struct Suspend {
@@ -30,16 +30,36 @@ impl EngineBuilder {
         };
         let stdout = env.stdout();
         let mut runtime = Runtime::new(env, Knowledge::standard());
-
+        let local = LocalScope {
+            ancestors: vec![0, 999999],
+        };
+        let var = TypePointer::Ref(TypeRef {
+            scope: local.clone(),
+            name: "a".to_string(),
+        });
         self.symbols.push(Symbol {
             name: "print".to_string(),
-            r#type: Type::client(Type::ForAll {
-                binders: vec!["a".to_string()],
-                body: Box::new(Type::Qual {
-                    ctx: vec![Type::app(Type::named("Show"), Type::named("a"))],
-                    body: Box::new(Type::named("a")),
+            r#type: TypePointer::app(
+                TypePointer::Ref(TypeRef {
+                    scope: STDLIB.as_local_scope(),
+                    name: "Client".to_string(),
                 }),
-            }),
+                TypePointer::ForAll(
+                    false,
+                    local.clone(),
+                    vec!["a".to_string()],
+                    Box::new(TypePointer::Qual(
+                        vec![TypePointer::app(
+                            TypePointer::Ref(TypeRef {
+                                scope: STDLIB.as_local_scope(),
+                                name: "Show".to_string(),
+                            }),
+                            var.clone(),
+                        )],
+                        Box::new(var),
+                    )),
+                ),
+            ),
             value: RuntimeValue::Channel(Channel::Client(stdout)),
         });
 
@@ -65,7 +85,7 @@ impl EngineBuilder {
         for sym in self.symbols {
             runtime
                 .knowledge
-                .declare_from_dict(&STDLIB, &sym.name, Dict::new(sym.r#type));
+                .declare_from_pointer(&STDLIB, &sym.name, sym.r#type);
             runtime.insert(sym.name, sym.value);
         }
 

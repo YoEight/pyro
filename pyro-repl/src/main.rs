@@ -145,7 +145,10 @@ fn type_expr(engine: &mut Engine, expr: String) -> eyre::Result<()> {
     let value = infer_val(engine.context(), &STDLIB, value)?;
     let value = annotate_val(engine.context(), value)?;
 
-    println!(">>> {}", value.tag.r#type.r#type);
+    println!(
+        ">>> {}",
+        engine.context().project_type(&value.tag.r#type).r#type
+    );
 
     Ok(())
 }

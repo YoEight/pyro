@@ -14,8 +14,8 @@ mod typing;
 mod utils;
 
 pub use crate::infer::{infer_decl, infer_program, infer_val};
-pub use crate::typing::{Dict, Knowledge, Type};
-pub use context::{Scope, STDLIB};
+pub use crate::typing::{Dict, Knowledge, Type, TypePointer, TypeRef};
+pub use context::{LocalScope, Scope, STDLIB};
 
 /// Location in input string
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]

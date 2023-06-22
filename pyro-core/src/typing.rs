@@ -3,22 +3,27 @@ use crate::context::{LocalScope, Scope};
 use crate::sym::{Literal, TypeSym};
 use crate::utils::generate_generic_type_name;
 use crate::{Pos, STDLIB};
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypePointer {
     Ref(TypeRef),
     Rec(Record<TypePointer>),
     Fun(Box<TypePointer>, Box<TypePointer>),
     App(Box<TypePointer>, Box<TypePointer>),
-    ForAll(LocalScope, Vec<String>, Box<TypePointer>),
+    ForAll(bool, LocalScope, Vec<String>, Box<TypePointer>),
     Qual(Vec<TypePointer>, Box<TypePointer>),
 }
 
 impl TypePointer {
     pub fn app(a: TypePointer, b: TypePointer) -> Self {
         TypePointer::App(Box::new(a), Box::new(b))
+    }
+
+    pub fn fun(a: TypePointer, b: TypePointer) -> Self {
+        TypePointer::Fun(Box::new(a), Box::new(b))
     }
 
     pub fn rec(props: Vec<Prop<TypePointer>>) -> Self {
@@ -37,6 +42,7 @@ pub struct TypeInfo {
 pub enum Type {
     /// Universally quantified type.
     ForAll {
+        explicit: bool,
         binders: Vec<String>,
         body: Box<Type>,
     },
@@ -55,13 +61,25 @@ pub enum Type {
 impl Display for Type {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Type::ForAll { binders, body } => {
-                write!(f, "forall ")?;
-                for bind in binders {
-                    write!(f, "{} ", bind)?;
+            Type::ForAll {
+                explicit,
+                binders,
+                body,
+            } => {
+                if *explicit {
+                    write!(f, "forall ")?;
+
+                    for (idx, bind) in binders.iter().enumerate() {
+                        if idx == 0 {
+                            write!(f, "{}", bind)?;
+                        } else {
+                            write!(f, " {}", bind)?;
+                        }
+                    }
+
+                    write!(f, ". ")?;
                 }
 
-                write!(f, ". ")?;
                 body.fmt(f)
             }
 
@@ -251,16 +269,16 @@ impl Dict {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
 pub struct TypeRef {
-    scope: LocalScope,
-    name: String,
+    pub scope: LocalScope,
+    pub name: String,
 }
 
 #[derive(Clone, Default)]
 struct ScopedTypes {
     name_gen: usize,
-    symbols: HashMap<String, Either<TypePointer, Dict>>,
+    symbols: HashMap<String, Either<TypePointer, RefCell<Dict>>>,
     used: HashSet<String>,
 }
 
@@ -426,7 +444,11 @@ impl Knowledge {
             let mut current = id;
 
             loop {
-                let types = self.dict_tables.get(&current.scope.id()).unwrap();
+                let types = if let Some(types) = self.dict_tables.get(&current.scope.id()) {
+                    types
+                } else {
+                    unreachable!()
+                };
                 match types.symbols.get(&current.name).unwrap() {
                     Either::Left(next) => {
                         let mut local = next;
@@ -477,6 +499,23 @@ impl Knowledge {
         }
     }
 
+    pub fn implements(&self, id: &TypePointer, constraint: &str) -> bool {
+        let mut current = id.clone();
+        loop {
+            match self.follow_link(&current) {
+                TypePointer::Ref(type_ref) => {
+                    let dict = self.dict(&type_ref).unwrap();
+                    return dict.implements(constraint);
+                }
+
+                TypePointer::Rec(_) => return self.default_rec_dict.implements(constraint),
+                TypePointer::Fun(_, _) => return self.default_fun_dict.implements(constraint),
+                TypePointer::App(constr, _) => current = constr.as_ref().clone(),
+                _ => return false,
+            }
+        }
+    }
+
     pub fn dict(&self, id: &TypeRef) -> Option<&Dict> {
         let mut current = id;
 
@@ -518,6 +557,10 @@ impl Knowledge {
         }
 
         None
+    }
+
+    pub fn unsafe_new_generic(&mut self, scope: &LocalScope, name: &str) {
+        self.declare_from_dict(scope, &name, Dict::new(Type::named(name.clone())));
     }
 
     pub fn new_generic<S: Scope>(&mut self, scope: &S) -> TypePointer {
@@ -580,8 +623,8 @@ impl Knowledge {
     }
 
     pub fn project_type(&self, id: &TypePointer) -> Dict {
-        match id {
-            TypePointer::Ref(r) => self.dict(r).cloned().unwrap(),
+        match self.follow_link(id) {
+            TypePointer::Ref(r) => self.dict(&r).cloned().unwrap(),
 
             TypePointer::Rec(rec) => {
                 let mut props = Vec::new();
@@ -626,7 +669,33 @@ impl Knowledge {
                 lhs
             }
 
-            _ => self.default_dict.clone(),
+            TypePointer::ForAll(explicit, _, binders, body) => {
+                let r#type = Type::ForAll {
+                    explicit,
+                    binders,
+                    body: Box::new(self.project_type(body.as_ref()).r#type),
+                };
+
+                let mut dict = self.default_dict.clone();
+                dict.r#type = r#type;
+                dict
+            }
+
+            TypePointer::Qual(ctx, body) => {
+                let ctx = ctx
+                    .iter()
+                    .map(|t| self.project_type(t).r#type)
+                    .collect::<Vec<_>>();
+
+                let r#type = Type::Qual {
+                    ctx,
+                    body: Box::new(self.project_type(body.as_ref()).r#type),
+                };
+
+                let mut dict = self.default_dict.clone();
+                dict.r#type = r#type;
+                dict
+            }
         }
     }
 
@@ -647,13 +716,23 @@ impl Knowledge {
                 let provided_dict = self.project_type(provided);
 
                 if require_dict.is_generic() {
-                    require_dict.impls.is_subset(&provided_dict.impls)
+                    if provided_dict.is_generic() {
+                        true
+                    } else {
+                        require_dict.impls.is_subset(&provided_dict.impls)
+                    }
                 } else {
                     require_dict.r#type == provided_dict.r#type
                 }
             }
 
-            TypePointer::ForAll(_, _, body) => self.param_matches(body.as_ref(), provided),
+            TypePointer::ForAll(_, scope, binders, body) => {
+                for binder in binders {
+                    self.unsafe_new_generic(scope, binder.as_str());
+                }
+
+                self.param_matches(body.as_ref(), provided)
+            }
 
             TypePointer::Qual(ctx, body) => {
                 for constraint in ctx {
@@ -672,7 +751,7 @@ impl Knowledge {
             }
 
             TypePointer::Fun(require_lhs, require_rhs) => {
-                if let TypePointer::Fun(provided_lhs, provided_rhs) = &provided {
+                if let TypePointer::Fun(provided_lhs, provided_rhs) = self.follow_link(&provided) {
                     return self.param_matches(require_lhs.as_ref(), provided_lhs.as_ref())
                         && self.param_matches(require_rhs.as_ref(), provided_rhs.as_ref());
                 }
@@ -681,7 +760,7 @@ impl Knowledge {
             }
 
             TypePointer::App(require_lhs, require_rhs) => {
-                if let TypePointer::App(provided_lhs, provided_rhs) = &provided {
+                if let TypePointer::App(provided_lhs, provided_rhs) = self.follow_link(&provided) {
                     return self.param_matches(require_lhs.as_ref(), provided_lhs.as_ref())
                         && self.param_matches(require_rhs.as_ref(), provided_rhs.as_ref());
                 }
@@ -690,7 +769,7 @@ impl Knowledge {
             }
 
             TypePointer::Rec(require_rec) => {
-                if let TypePointer::Rec(provided_rec) = provided {
+                if let TypePointer::Rec(provided_rec) = self.follow_link(&provided) {
                     if require_rec.props.len() != provided_rec.props.len() {
                         return false;
                     }
@@ -721,7 +800,7 @@ impl Knowledge {
         loop {
             match current {
                 TypePointer::Ref(p) => {
-                    if let Some(dict) = self.dict_mut(p) {
+                    if let Some(dict) = self.dict_mut(&p) {
                         if dict.is_generic() && !dict.implements(constraint) {
                             dict.add(constraint);
                         }
@@ -872,6 +951,7 @@ fn test_type_check_generic() {
     let target_type = TypePointer::app(
         know.client_pointer(),
         TypePointer::ForAll(
+            false,
             scope,
             vec!["a".to_string()],
             Box::new(TypePointer::Qual(
@@ -893,6 +973,7 @@ fn test_type_check_generic_complex() {
     let target_type = TypePointer::app(
         know.client_pointer(),
         TypePointer::rec(vec![Prop::ano(TypePointer::ForAll(
+            false,
             scope,
             vec!["a".to_string()],
             Box::new(TypePointer::Qual(
