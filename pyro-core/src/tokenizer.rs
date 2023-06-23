@@ -148,7 +148,37 @@ impl<'a> Tokenizer<'a> {
                 '@' => self.consume(chars, Sym::At),
                 '_' => self.consume(chars, Sym::Underscore),
                 '\\' => self.consume(chars, Sym::BackSlash),
-                '|' => self.consume(chars, Sym::Punctuation(Punctuation::Pipe)),
+                '|' => {
+                    chars.next();
+
+                    if let Some('|') = chars.peek() {
+                        chars.next();
+                        return Ok(Some(Sym::Id("||".to_string())));
+                    }
+
+                    Ok(Some(Sym::Punctuation(Punctuation::Pipe)))
+                }
+
+                '&' => {
+                    chars.next();
+
+                    let pos = chars.pos();
+                    if let Some(c) = chars.next() {
+                        if c == '&' {
+                            return Ok(Some(Sym::Id("&&".to_string())));
+                        }
+
+                        return Err(Error {
+                            pos,
+                            message: format!("Unexpected symbol '{}'", c),
+                        });
+                    }
+
+                    Err(Error {
+                        message: "Unexpected end of file".to_string(),
+                        pos: chars.pos(),
+                    })
+                }
 
                 '!' => {
                     chars.next();
@@ -213,6 +243,11 @@ impl<'a> Tokenizer<'a> {
                 '-' => {
                     chars.next();
                     Ok(Some(Sym::Id("-".to_string())))
+                }
+
+                '*' => {
+                    chars.next();
+                    Ok(Some(Sym::Id("*".to_string())))
                 }
 
                 '=' => {
