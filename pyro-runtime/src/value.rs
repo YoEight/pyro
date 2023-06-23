@@ -1,7 +1,8 @@
 use futures::future::BoxFuture;
 use pyro_core::annotate::Ann;
-use pyro_core::ast::{Abs, Record, Tag, Type};
+use pyro_core::ast::{Abs, Record, Tag};
 use pyro_core::sym::Literal;
+use pyro_core::{TypePointer, TypeRef, STDLIB};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -12,7 +13,7 @@ pub trait PyroLiteral {
     where
         Self: Sized;
 
-    fn r#type() -> Type;
+    fn r#type() -> TypePointer;
 
     fn value(self) -> RuntimeValue;
 }
@@ -29,8 +30,11 @@ impl PyroLiteral for i64 {
         eyre::bail!("Expected an u64 runtime value")
     }
 
-    fn r#type() -> Type {
-        Type::integer()
+    fn r#type() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Integer".to_string(),
+        })
     }
 
     fn value(self) -> RuntimeValue {
@@ -50,8 +54,11 @@ impl PyroLiteral for char {
         eyre::bail!("Expected a char runtime value")
     }
 
-    fn r#type() -> Type {
-        Type::char()
+    fn r#type() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Char".to_string(),
+        })
     }
 
     fn value(self) -> RuntimeValue {
@@ -71,8 +78,11 @@ impl PyroLiteral for String {
         eyre::bail!("Expected a char runtime value")
     }
 
-    fn r#type() -> Type {
-        Type::string()
+    fn r#type() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "String".to_string(),
+        })
     }
 
     fn value(self) -> RuntimeValue {
@@ -92,93 +102,15 @@ impl PyroLiteral for bool {
         eyre::bail!("Expected a bool runtime value")
     }
 
-    fn r#type() -> Type {
-        Type::bool()
+    fn r#type() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Bool".to_string(),
+        })
     }
 
     fn value(self) -> RuntimeValue {
         RuntimeValue::Literal(Literal::Bool(self))
-    }
-}
-
-#[derive(Clone)]
-pub struct Symbol {
-    pub name: String,
-    pub r#type: Type,
-    pub value: RuntimeValue,
-}
-
-impl Symbol {
-    pub fn func<F, A, B>(name: impl AsRef<str>, func: F) -> Self
-    where
-        F: Fn(A) -> B + Send + Sync + 'static,
-        A: PyroLiteral,
-        B: PyroLiteral,
-    {
-        let func = Arc::new(func);
-        let value = RuntimeValue::Fun(Arc::new(move |a| {
-            let a = Arc::new(a);
-            let func_local = func.clone();
-            Box::pin(async move { Ok(func_local(PyroLiteral::try_from_value(a.clone())?).value()) })
-        }));
-
-        let r#type = Type::func(A::r#type(), B::r#type());
-
-        Symbol {
-            name: name.as_ref().to_string(),
-            r#type,
-            value,
-        }
-    }
-
-    pub fn func_2<F, A, B, C>(name: impl AsRef<str>, func: F) -> Self
-    where
-        F: Fn(A, B) -> C + Send + Sync + 'static,
-        A: PyroLiteral,
-        B: PyroLiteral,
-        C: PyroLiteral,
-    {
-        let func = Arc::new(func);
-        let value = RuntimeValue::Fun(Arc::new(move |a| {
-            let a = Arc::new(a);
-            let func_local_1 = func.clone();
-            Box::pin(async move {
-                let a_1 = a.clone();
-                let func_local_2 = func_local_1.clone();
-                Ok(RuntimeValue::Fun(Arc::new(move |b| {
-                    let a_2 = a_1.clone();
-                    let b = Arc::new(b);
-                    let func_local_3 = func_local_2.clone();
-                    Box::pin(async move {
-                        Ok(func_local_3(
-                            PyroLiteral::try_from_value(a_2.clone())?,
-                            PyroLiteral::try_from_value(b.clone())?,
-                        )
-                        .value())
-                    })
-                })))
-            })
-        }));
-
-        let r#type = Type::func(A::r#type(), Type::func(B::r#type(), C::r#type()));
-
-        Symbol {
-            name: name.as_ref().to_string(),
-            r#type,
-            value,
-        }
-    }
-
-    pub fn client(
-        name: impl AsRef<str>,
-        inner_type: Type,
-        sender: UnboundedSender<RuntimeValue>,
-    ) -> Self {
-        Self {
-            name: name.as_ref().to_string(),
-            r#type: Type::client(inner_type),
-            value: RuntimeValue::Channel(Channel::Client(sender)),
-        }
     }
 }
 

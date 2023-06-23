@@ -13,7 +13,9 @@ pub mod tokenizer;
 mod typing;
 mod utils;
 
-pub use context::{Ctx, STDLIB};
+pub use crate::infer::{infer_decl, infer_program, infer_val};
+pub use crate::typing::{Dict, Knowledge, Type, TypePointer, TypeRef, UsedVariables};
+pub use context::{LocalScope, Scope, STDLIB};
 
 /// Location in input string
 #[derive(Debug, Eq, PartialEq, Clone, Copy)]
@@ -46,10 +48,68 @@ pub fn tokenize(src: &str) -> eyre::Result<Vec<Token>> {
     Ok(tokens)
 }
 
-pub fn parse(ctx: Ctx, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
+pub fn parse(ctx: &mut Knowledge, src: &str) -> eyre::Result<Vec<Tag<Proc<Ann>, Ann>>> {
     let tokens = tokenize(src)?;
     let parser = Parser::new(tokens.as_slice());
-    let program = annotate_program(ctx, parser.parse()?)?;
+    let scope = ctx.new_scope(&STDLIB);
+    let inferred = infer_program(ctx, &scope, parser.parse()?)?;
+    let program = annotate_program(ctx, inferred)?;
 
     Ok(program.procs)
+}
+
+fn variable_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Variable '{}' does not exist",
+        pos.line,
+        pos.column,
+        name
+    )
+}
+
+fn type_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Type '{}' does not exist",
+        pos.line,
+        pos.column,
+        name
+    )
+}
+
+fn record_label_not_found<A>(pos: Pos, name: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Record label '{}' does not exist",
+        pos.line,
+        pos.column,
+        name
+    )
+}
+
+fn type_error<A>(pos: Pos, expected: &Type, got: &Type) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Expected type {} but got {}",
+        pos.line,
+        pos.column,
+        expected,
+        got
+    )
+}
+
+fn not_implement<A>(pos: Pos, r#type: &Type, constraint: &str) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Type {} doesn't derive {}",
+        pos.line,
+        pos.column,
+        r#type,
+        constraint
+    )
+}
+
+fn not_a_function<A>(pos: Pos, r#type: &Type) -> eyre::Result<A> {
+    eyre::bail!(
+        "{}:{}: Type {} is not a function",
+        pos.line,
+        pos.column,
+        r#type
+    )
 }

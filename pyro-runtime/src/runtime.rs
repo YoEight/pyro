@@ -2,26 +2,23 @@ use crate::env::Env;
 use crate::value::{Channel, RuntimeValue};
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Decl, Def};
-use std::collections::{HashMap, HashSet};
+use pyro_core::{Scope, UsedVariables};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 
 #[derive(Clone)]
 pub struct Runtime {
-    env: Env,
-    variables: HashMap<String, RuntimeValue>,
+    pub(crate) env: Option<Env>,
+    pub(crate) variables: HashMap<String, RuntimeValue>,
+    pub(crate) used: UsedVariables,
 }
 
 impl Runtime {
-    pub fn new(env: Env) -> Self {
-        Self {
-            env,
-            variables: Default::default(),
-        }
-    }
-
     pub fn println(&self, msg: impl AsRef<str>) {
-        let _ = self.env.stdout_handle.send(RuntimeValue::string(msg));
+        if let Some(env) = self.env.as_ref() {
+            let _ = env.stdout_handle.send(RuntimeValue::string(msg));
+        }
     }
 
     pub(crate) fn look_up(&self, name: &str) -> eyre::Result<RuntimeValue> {
@@ -60,36 +57,8 @@ impl Runtime {
         }
     }
 
-    pub fn keeps<'a, I>(&mut self, keys: I)
-    where
-        I: Iterator<Item = &'a String>,
-    {
-        let mut set = HashSet::new();
-        let mut stack = Vec::new();
-
-        for key in keys {
-            set.insert(key.clone());
-
-            if let Some(value) = self.variables.get(key) {
-                if let RuntimeValue::Abs(abs) = value {
-                    stack.push(abs.tag.used.keys().cloned());
-                }
-            }
-        }
-
-        while let Some(deps) = stack.pop() {
-            for dep in deps {
-                if set.contains(&dep) {
-                    continue;
-                }
-
-                set.insert(dep.clone());
-                if let Some(RuntimeValue::Abs(abs)) = self.variables.get(&dep) {
-                    stack.push(abs.tag.used.keys().cloned());
-                }
-            }
-        }
-
+    pub fn keeps<S: Scope>(&mut self, scope: &S) {
+        let set = self.used.list_used_variables(scope);
         self.variables.retain(|k, _| set.contains(k));
     }
 

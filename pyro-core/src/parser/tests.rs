@@ -1,6 +1,6 @@
-use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
 use crate::parser::{Parser, ParserState};
-use crate::sym::{Literal, Sym};
+use crate::sym::{Literal, Sym, TypeSym};
 use crate::tokenizer::Tokenizer;
 use crate::Pos;
 use pretty_assertions::assert_eq;
@@ -55,7 +55,8 @@ fn test_parse_abs_with_input() {
                             item: Pat::Var(PatVar {
                                 var: Var {
                                     id: "b".to_string(),
-                                    r#type: Type::generic("a".to_string()),
+                                    r#type: TypeSym::Unknown,
+                                    tag: Pos { line: 1, column: 7 },
                                 },
                                 pattern: None,
                             }),
@@ -120,7 +121,8 @@ fn test_parse_parallel() {
                                         item: Pat::Var(PatVar {
                                             var: Var {
                                                 id: "b".to_string(),
-                                                r#type: Type::generic("a".to_string()),
+                                                r#type: TypeSym::Unknown,
+                                                tag: Pos { line: 1, column: 9 },
                                             },
                                             pattern: None,
                                         }),
@@ -175,7 +177,11 @@ fn test_parse_parallel() {
                                         item: Pat::Var(PatVar {
                                             var: Var {
                                                 id: "d".to_string(),
-                                                r#type: Type::generic("b".to_string()),
+                                                r#type: TypeSym::Unknown,
+                                                tag: Pos {
+                                                    line: 1,
+                                                    column: 21,
+                                                },
                                             },
                                             pattern: None,
                                         }),
@@ -236,15 +242,15 @@ fn test_parse_record_type() {
     let mut state = ParserState::new(tokens.as_slice());
     let ast = state.parse_record_type().unwrap();
 
-    let expected = Type::Record(Record {
+    let expected = TypeSym::Rec(Record {
         props: vec![
             Prop {
                 label: Some("a".to_string()),
-                val: Type::named("Foo"),
+                val: TypeSym::Name("Foo".to_string()),
             },
             Prop {
                 label: None,
-                val: Type::named("Baz"),
+                val: TypeSym::Name("Baz".to_string()),
             },
         ]
         .into(),
@@ -305,7 +311,7 @@ fn test_parse_new_channel() {
     let ast = state.parse_decl().unwrap();
 
     let expected = Decl::Channels(vec![Tag {
-        item: ("stream".to_string(), Type::named("Bool")),
+        item: ("stream".to_string(), TypeSym::Name("Bool".to_string())),
         tag: Pos { line: 1, column: 5 },
     }]);
 
@@ -323,18 +329,18 @@ fn test_parse_type_decl() {
 
     let expected = Decl::Type(
         "Foobar".to_string(),
-        Type::channel(Type::Record(Record {
+        TypeSym::channel(TypeSym::Rec(Record {
             props: vec![
                 Prop {
                     label: Some("too".to_string()),
-                    val: Type::named("String"),
+                    val: TypeSym::Name("String".to_string()),
                 },
                 Prop {
                     label: None,
-                    val: Type::channel(Type::Record(Record {
+                    val: TypeSym::channel(TypeSym::Rec(Record {
                         props: vec![Prop {
                             label: None,
-                            val: Type::named("Int"),
+                            val: TypeSym::Name("Int".to_string()),
                         }]
                         .into(),
                     })),
@@ -374,7 +380,8 @@ fn test_parse_defs() {
                                             item: Pat::Var(PatVar {
                                                 var: Var {
                                                     id: "b".to_string(),
-                                                    r#type: Type::named("Boolean"),
+                                                    r#type: TypeSym::Name("Boolean".to_string()),
+                                                    tag: Pos { line: 1, column: 8 },
                                                 },
                                                 pattern: None,
                                             }),
@@ -415,9 +422,11 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "t".to_string(),
-                                                                        r#type: Type::generic(
-                                                                            "a".to_string(),
-                                                                        ),
+                                                                        r#type: TypeSym::Unknown,
+                                                                        tag: Pos {
+                                                                            line: 1,
+                                                                            column: 24,
+                                                                        },
                                                                     },
                                                                     pattern: None,
                                                                 }),
@@ -433,9 +442,11 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "f".to_string(),
-                                                                        r#type: Type::generic(
-                                                                            "b".to_string(),
-                                                                        ),
+                                                                        r#type: TypeSym::Unknown,
+                                                                        tag: Pos {
+                                                                            line: 1,
+                                                                            column: 26,
+                                                                        },
                                                                     },
                                                                     pattern: None,
                                                                 }),
@@ -500,7 +511,8 @@ fn test_parse_defs() {
                                             item: Pat::Var(PatVar {
                                                 var: Var {
                                                     id: "b".to_string(),
-                                                    r#type: Type::named("Boolean"),
+                                                    r#type: TypeSym::Name("Boolean".to_string()),
+                                                    tag: Pos { line: 2, column: 8 },
                                                 },
                                                 pattern: None,
                                             }),
@@ -541,9 +553,11 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "t".to_string(),
-                                                                        r#type: Type::generic(
-                                                                            "c".to_string(),
-                                                                        ),
+                                                                        r#type: TypeSym::Unknown,
+                                                                        tag: Pos {
+                                                                            line: 2,
+                                                                            column: 24,
+                                                                        },
                                                                     },
                                                                     pattern: None,
                                                                 }),
@@ -559,9 +573,11 @@ fn test_parse_defs() {
                                                                 item: Pat::Var(PatVar {
                                                                     var: Var {
                                                                         id: "f".to_string(),
-                                                                        r#type: Type::generic(
-                                                                            "d".to_string(),
-                                                                        ),
+                                                                        r#type: TypeSym::Unknown,
+                                                                        tag: Pos {
+                                                                            line: 2,
+                                                                            column: 26,
+                                                                        },
                                                                     },
                                                                     pattern: None,
                                                                 }),

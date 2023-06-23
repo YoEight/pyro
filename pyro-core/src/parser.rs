@@ -1,10 +1,9 @@
 #[cfg(test)]
 mod tests;
 
-use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Type, Val, Var};
-use crate::sym::{Keyword, Punctuation, Sym};
+use crate::ast::{Abs, Decl, Def, Pat, PatVar, Proc, Program, Prop, Record, Tag, Val, Var};
+use crate::sym::{Keyword, Punctuation, Sym, TypeSym};
 use crate::tokenizer::Token;
-use crate::utils::generate_generic_type_name;
 use crate::{Error, Pos, Result};
 use std::iter::Peekable;
 use std::slice::Iter;
@@ -29,7 +28,7 @@ impl RecordKind for RecordValue {
 }
 
 impl RecordKind for RecordType {
-    type Value = Type;
+    type Value = TypeSym;
 
     fn parse_value(&self, state: &mut ParserState) -> Result<Self::Value> {
         state.parse_type()
@@ -130,7 +129,8 @@ impl<'a> ParserState<'a> {
         self.next_sym(Sym::Punctuation(expected))
     }
 
-    pub fn parse_variable(&mut self) -> Result<Var> {
+    pub fn parse_variable(&mut self) -> Result<Var<Pos>> {
+        let pos = self.pos();
         let token = self.shift();
         match &token.item {
             Sym::Id(name) => {
@@ -140,6 +140,7 @@ impl<'a> ParserState<'a> {
                 Ok(Var {
                     id: name.clone(),
                     r#type,
+                    tag: pos,
                 })
             }
 
@@ -150,19 +151,17 @@ impl<'a> ParserState<'a> {
         }
     }
 
-    pub fn parse_rtype(&mut self) -> Result<Type> {
+    pub fn parse_rtype(&mut self) -> Result<TypeSym> {
         if self.next_punct(Punctuation::Colon) {
             self.shift();
             self.skip_spaces();
             self.parse_type()
         } else {
-            Ok(Type::generic(generate_generic_type_name(
-                self.next_type_id(),
-            )))
+            Ok(TypeSym::Unknown)
         }
     }
 
-    fn parse_type(&mut self) -> Result<Type> {
+    fn parse_type(&mut self) -> Result<TypeSym> {
         enum Constr {
             InOut,
             In,
@@ -176,7 +175,7 @@ impl<'a> ParserState<'a> {
             match token.item() {
                 Sym::Type(s) => {
                     self.shift();
-                    break Type::named(s);
+                    break TypeSym::Name(s.clone());
                 }
 
                 Sym::Punctuation(p)
@@ -210,9 +209,24 @@ impl<'a> ParserState<'a> {
 
         while let Some(constr) = constrs.pop() {
             match constr {
-                Constr::InOut => r#type = Type::channel(r#type),
-                Constr::In => r#type = Type::server(r#type),
-                Constr::Out => r#type = Type::client(r#type),
+                Constr::InOut => {
+                    r#type = TypeSym::App(
+                        Box::new(TypeSym::Name("Channel".to_string())),
+                        Box::new(r#type),
+                    )
+                }
+                Constr::In => {
+                    r#type = TypeSym::App(
+                        Box::new(TypeSym::Name("Server".to_string())),
+                        Box::new(r#type),
+                    )
+                }
+                Constr::Out => {
+                    r#type = TypeSym::App(
+                        Box::new(TypeSym::Name("Client".to_string())),
+                        Box::new(r#type),
+                    )
+                }
             }
         }
 
@@ -356,8 +370,8 @@ impl<'a> ParserState<'a> {
         Ok(Record { props })
     }
 
-    pub fn parse_record_type(&mut self) -> Result<Type> {
-        Ok(Type::Record(self.parse_record(RecordType)?.map(|p| p.item)))
+    pub fn parse_record_type(&mut self) -> Result<TypeSym> {
+        Ok(TypeSym::Rec(self.parse_record(RecordType)?.map(|p| p.item)))
     }
 
     pub fn parse_record_value(&mut self) -> Result<Tag<Val<Pos>, Pos>> {
@@ -492,7 +506,11 @@ impl<'a> ParserState<'a> {
 
                 let pattern = if self.next_sym(Sym::At) {
                     self.shift();
-                    Some(Box::new(self.parse_pat()?))
+                    let pat_pos = self.pos();
+                    Some(Box::new(Tag {
+                        item: self.parse_pat()?,
+                        tag: pat_pos,
+                    }))
                 } else {
                     None
                 };

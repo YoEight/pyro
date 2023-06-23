@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use clap::Parser;
-use pyro_runtime::Engine;
+use pyro_runtime::{Engine, Env};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -22,6 +22,6 @@ async fn main() -> eyre::Result<()> {
         println!("Tokens: {:?}", pyro_core::tokenize(source.as_str()));
     }
 
-    let engine = Engine::builder().build();
+    let engine = Engine::builder().stdlib(Env::stdio()).build();
     engine.run(source.as_str()).await
 }
