@@ -1,9 +1,12 @@
 use crate::env::Env;
 use crate::runtime::Runtime;
 use crate::value::{Channel, RuntimeValue, Symbol};
+use crate::PyroLiteral;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Dict, Knowledge, LocalScope, Type, TypePointer, TypeRef, STDLIB};
+use pyro_core::{Dict, Knowledge, Type, TypePointer, STDLIB};
+use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 
 struct Suspend {
@@ -16,85 +19,129 @@ enum Msg {
     Completed(u64),
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct EngineBuilder {
     symbols: Vec<Symbol>,
     types: Vec<(String, Type)>,
+    knowledge: Knowledge,
+    runtime_values: HashMap<String, RuntimeValue>,
+    env: Option<Env>,
+}
+
+impl Default for EngineBuilder {
+    fn default() -> Self {
+        Self {
+            symbols: vec![],
+            types: vec![],
+            knowledge: Knowledge::standard(),
+            runtime_values: Default::default(),
+            env: None,
+        }
+    }
 }
 
 impl EngineBuilder {
-    pub fn build(mut self) -> Engine {
-        let (print_output, print_input) = mpsc::unbounded_channel();
-        let env = Env {
-            stdout_handle: print_output,
-        };
-        let stdout = env.stdout();
-        let mut knowledge = Knowledge::standard();
-        let mut runtime = Runtime::new(env);
-        let local = LocalScope {
-            ancestors: vec![0, 999999],
-        };
-        let var = TypePointer::Ref(TypeRef {
-            scope: local.clone(),
-            name: "'a".to_string(),
-        });
-        self.symbols.push(Symbol {
-            name: "print".to_string(),
-            r#type: TypePointer::app(
-                TypePointer::Ref(TypeRef {
-                    scope: STDLIB.as_local_scope(),
-                    name: "Client".to_string(),
-                }),
+    pub fn register_function_2<F, A, B, C>(mut self, name: impl AsRef<str>, func: F) -> Self
+    where
+        F: Fn(A, B) -> C + Send + Sync + 'static,
+        A: PyroLiteral,
+        B: PyroLiteral,
+        C: PyroLiteral,
+    {
+        let func = Arc::new(func);
+        let value = RuntimeValue::Fun(Arc::new(move |a| {
+            let a = Arc::new(a);
+            let func_local_1 = func.clone();
+            Box::pin(async move {
+                let a_1 = a.clone();
+                let func_local_2 = func_local_1.clone();
+                Ok(RuntimeValue::Fun(Arc::new(move |b| {
+                    let a_2 = a_1.clone();
+                    let b = Arc::new(b);
+                    let func_local_3 = func_local_2.clone();
+                    Box::pin(async move {
+                        Ok(func_local_3(
+                            PyroLiteral::try_from_value(a_2.clone())?,
+                            PyroLiteral::try_from_value(b.clone())?,
+                        )
+                        .value())
+                    })
+                })))
+            })
+        }));
+
+        let r#type = TypePointer::fun(A::r#type(), TypePointer::fun(B::r#type(), C::r#type()));
+        self.knowledge.declare_from_pointer(&STDLIB, &name, r#type);
+        self.runtime_values.insert(name.as_ref().to_string(), value);
+        self
+    }
+
+    pub fn register_type(mut self, name: impl AsRef<str>, dict: Dict) -> Self {
+        self.knowledge.declare_from_dict(&STDLIB, name, dict);
+        self
+    }
+
+    pub fn env(mut self, env: Env) -> Self {
+        self.env = Some(env);
+        self
+    }
+
+    pub fn stdlib(mut self, env: Env) -> Self {
+        let print_forall_scope = self.knowledge.new_scope(&STDLIB);
+        let print_forall_var_type = Dict::new(Type::named("'a"));
+        let print_forall_var =
+            self.knowledge
+                .declare_from_dict(&print_forall_scope, "'a", print_forall_var_type);
+        self.knowledge.declare_from_pointer(
+            &STDLIB,
+            "print",
+            TypePointer::app(
+                self.knowledge.client_pointer(),
                 TypePointer::ForAll(
                     false,
-                    local.clone(),
+                    print_forall_scope.clone(),
                     vec!["'a".to_string()],
                     Box::new(TypePointer::Qual(
                         vec![TypePointer::app(
-                            TypePointer::Ref(TypeRef {
-                                scope: STDLIB.as_local_scope(),
-                                name: "Show".to_string(),
-                            }),
-                            var.clone(),
+                            self.knowledge.show_pointer(),
+                            print_forall_var.clone(),
                         )],
-                        Box::new(var),
+                        Box::new(print_forall_var),
                     )),
                 ),
             ),
-            value: RuntimeValue::Channel(Channel::Client(stdout)),
-        });
+        );
 
-        self.symbols
-            .push(Symbol::func_2("+", |a: i64, b: i64| a + b));
-        self.symbols
-            .push(Symbol::func_2("-", |a: i64, b: i64| a - b));
-        self.symbols
-            .push(Symbol::func_2("*", |a: i64, b: i64| a * b));
-        self.symbols
-            .push(Symbol::func_2("<=", |a: i64, b: i64| a <= b));
-        self.symbols
-            .push(Symbol::func_2("<", |a: i64, b: i64| a < b));
-        self.symbols
-            .push(Symbol::func_2(">=", |a: i64, b: i64| a >= b));
-        self.symbols
-            .push(Symbol::func_2(">", |a: i64, b: i64| a > b));
-        self.symbols
-            .push(Symbol::func_2("==", |a: i64, b: i64| a == b));
-        self.symbols.push(Symbol::func_2("&&", |a, b| a && b));
-        self.symbols.push(Symbol::func_2("||", |a, b| a || b));
+        self.runtime_values.insert(
+            "print".to_string(),
+            RuntimeValue::Channel(Channel::Client(env.stdout())),
+        );
 
-        for sym in self.symbols {
-            knowledge.declare_from_pointer(&STDLIB, &sym.name, sym.r#type);
-            runtime.insert(sym.name, sym.value);
+        self.env = Some(env);
+
+        self.register_function_2("+", |a: i64, b: i64| a + b)
+            .register_function_2("-", |a: i64, b: i64| a - b)
+            .register_function_2("*", |a: i64, b: i64| a * b)
+            .register_function_2("<=", |a: i64, b: i64| a <= b)
+            .register_function_2("<", |a: i64, b: i64| a < b)
+            .register_function_2(">=", |a: i64, b: i64| a >= b)
+            .register_function_2(">", |a: i64, b: i64| a > b)
+            .register_function_2("==", |a: i64, b: i64| a == b)
+            .register_function_2("&&", |a, b| a && b)
+            .register_function_2("||", |a, b| a || b)
+    }
+
+    pub fn build(self) -> Engine {
+        let runtime = Runtime {
+            env: self.env,
+            variables: self.runtime_values,
+            used: Default::default(),
+        };
+
+        Engine {
+            runtime,
+            knowledge: self.knowledge,
         }
-
-        for (name, r#type) in self.types {
-            knowledge.declare_from_dict(&STDLIB, name, Dict::new(r#type));
-        }
-
-        spawn_stdout_process(print_input);
-
-        Engine { runtime, knowledge }
     }
 
     pub fn add_symbol(mut self, sym: Symbol) -> Self {
@@ -188,14 +235,6 @@ impl Engine {
         handle.await?;
         Ok(())
     }
-}
-
-fn spawn_stdout_process(mut input: mpsc::UnboundedReceiver<RuntimeValue>) {
-    tokio::spawn(async move {
-        while let Some(value) = input.recv().await {
-            println!("{}", value);
-        }
-    });
 }
 
 async fn execute_proc(

@@ -7,7 +7,7 @@ use pyro_core::parser::ParserState;
 use pyro_core::sym::Sym;
 use pyro_core::tokenizer::Tokenizer;
 use pyro_core::{infer_decl, infer_val, STDLIB};
-use pyro_runtime::{Engine, EngineBuilder};
+use pyro_runtime::{Engine, EngineBuilder, Env};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -39,7 +39,7 @@ async fn main() -> eyre::Result<()> {
         .version("master");
 
     let mut inputs = glyph::file_backed_inputs(options, ".pyro-repl")?;
-    let mut engine = EngineBuilder::default().build();
+    let mut engine = EngineBuilder::default().stdlib(Env::stdio()).build();
 
     while let Some(input) = inputs.next_input()? {
         match input {

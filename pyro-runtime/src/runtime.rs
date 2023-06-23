@@ -9,22 +9,16 @@ use tokio::sync::{mpsc, Mutex};
 
 #[derive(Clone)]
 pub struct Runtime {
-    env: Env,
+    pub(crate) env: Option<Env>,
     pub(crate) variables: HashMap<String, RuntimeValue>,
     pub(crate) used: UsedVariables,
 }
 
 impl Runtime {
-    pub fn new(env: Env) -> Self {
-        Self {
-            env,
-            variables: Default::default(),
-            used: UsedVariables::default(),
-        }
-    }
-
     pub fn println(&self, msg: impl AsRef<str>) {
-        let _ = self.env.stdout_handle.send(RuntimeValue::string(msg));
+        if let Some(env) = self.env.as_ref() {
+            let _ = env.stdout_handle.send(RuntimeValue::string(msg));
+        }
     }
 
     pub(crate) fn look_up(&self, name: &str) -> eyre::Result<RuntimeValue> {
