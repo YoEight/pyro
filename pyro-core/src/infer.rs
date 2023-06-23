@@ -75,7 +75,8 @@ pub fn infer_proc<S: Scope>(
             let mut new_ps = Vec::new();
 
             for p in ps {
-                new_ps.push(infer_proc(know, scope, p)?);
+                let new_scope = know.new_scope(scope);
+                new_ps.push(infer_proc(know, &new_scope, p)?);
             }
 
             Ok(Tag {

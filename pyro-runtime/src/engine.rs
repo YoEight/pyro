@@ -1,6 +1,6 @@
 use crate::env::Env;
 use crate::runtime::Runtime;
-use crate::value::{Channel, RuntimeValue, Symbol};
+use crate::value::{Channel, RuntimeValue};
 use crate::PyroLiteral;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
@@ -21,8 +21,6 @@ enum Msg {
 
 #[derive(Clone)]
 pub struct EngineBuilder {
-    symbols: Vec<Symbol>,
-    types: Vec<(String, Type)>,
     knowledge: Knowledge,
     runtime_values: HashMap<String, RuntimeValue>,
     env: Option<Env>,
@@ -31,8 +29,6 @@ pub struct EngineBuilder {
 impl Default for EngineBuilder {
     fn default() -> Self {
         Self {
-            symbols: vec![],
-            types: vec![],
             knowledge: Knowledge::standard(),
             runtime_values: Default::default(),
             env: None,
@@ -142,16 +138,6 @@ impl EngineBuilder {
             runtime,
             knowledge: self.knowledge,
         }
-    }
-
-    pub fn add_symbol(mut self, sym: Symbol) -> Self {
-        self.symbols.push(sym);
-        self
-    }
-
-    pub fn add_type(mut self, name: impl AsRef<str>, r#type: Type) -> Self {
-        self.types.push((name.as_ref().to_string(), r#type));
-        self
     }
 }
 
@@ -359,7 +345,6 @@ async fn execute_input(
         );
     };
 
-    runtime.keeps(&abs.tag.scope);
     let mut recv = receiver.lock().await;
     if let Some(value) = recv.recv().await {
         update_scope(runtime, &value, abs.item.pattern.item.clone());
