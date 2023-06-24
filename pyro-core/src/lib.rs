@@ -15,8 +15,9 @@ mod utils;
 
 pub use crate::infer::{infer_decl, infer_program, infer_val};
 pub use crate::typing::{
-    Dict, ForAllBuilder, ForAllVarBuilder, FuncBuilder, Knowledge, PyroType, Type, TypeBuilder,
-    TypeConstrBuilder, TypeConstrForAllVarBuilder, TypePointer, TypeRef, UsedVariables,
+    Dict, ForAllBuilder, ForAllVarBuilder, FuncBuilder, Knowledge, NamedTypeBuilder, PyroType,
+    Type, TypeBuilder, TypeConstrBuilder, TypeConstrForAllVarBuilder, TypePointer, TypeRef,
+    UsedVariables,
 };
 pub use context::{LocalScope, Scope, STDLIB};
 

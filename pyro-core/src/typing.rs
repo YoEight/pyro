@@ -1000,12 +1000,12 @@ impl<'a> TypeBuilder<'a> {
         }
     }
 
-    pub fn named(self, name: impl AsRef<str>) -> eyre::Result<TypePointer> {
-        if let Some(pointer) = self.know.look_up(&STDLIB, name.as_ref()) {
-            return Ok(pointer.clone());
+    pub fn named(self, name: impl AsRef<str>) -> NamedTypeBuilder<'a> {
+        NamedTypeBuilder {
+            name: name.as_ref().to_string(),
+            constraints: vec![],
+            inner: self,
         }
-
-        eyre::bail!("Type '{}' doesn't exist", name.as_ref())
     }
 
     pub fn of<T: PyroType>(&self) -> eyre::Result<TypePointer> {
@@ -1040,6 +1040,33 @@ impl<'a> TypeBuilder<'a> {
             constr,
             inner: self,
         })
+    }
+}
+
+pub struct NamedTypeBuilder<'a> {
+    name: String,
+    constraints: Vec<String>,
+    inner: TypeBuilder<'a>,
+}
+
+impl<'a> NamedTypeBuilder<'a> {
+    pub fn add_constraint(mut self, constraint: impl AsRef<str>) -> eyre::Result<Self> {
+        self.inner.look_up(constraint.as_ref())?;
+        self.constraints.push(constraint.as_ref().to_string());
+
+        Ok(self)
+    }
+
+    pub fn done(self) -> TypePointer {
+        if let Some(pointer) = self.inner.know.look_up(&STDLIB, self.name.as_str()) {
+            pointer
+        } else {
+            self.inner.know.declare_from_dict(
+                &STDLIB,
+                self.name.as_str(),
+                Dict::with_impls(Type::named(self.name.as_str()), self.constraints),
+            )
+        }
     }
 }
 

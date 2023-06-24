@@ -4,7 +4,7 @@ use crate::value::{Channel, RuntimeValue};
 use crate::PyroLiteral;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Dict, Knowledge, STDLIB};
+use pyro_core::{Knowledge, PyroType, TypePointer, STDLIB};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -83,9 +83,16 @@ impl EngineBuilder {
         Ok(self)
     }
 
-    pub fn register_type(mut self, name: impl AsRef<str>, dict: Dict) -> Self {
-        self.knowledge.declare_from_dict(&STDLIB, name, dict);
-        self
+    pub fn register_type<T: PyroType>(mut self, name: impl AsRef<str>) -> eyre::Result<Self> {
+        let pointer = T::r#type(&self.knowledge.type_builder())?;
+
+        if let TypePointer::Ref(_) = &pointer {
+            return Ok(self);
+        } else {
+            self.knowledge.declare_from_pointer(&STDLIB, name, pointer);
+        }
+
+        Ok(self)
     }
 
     pub fn env(mut self, env: Env) -> Self {
