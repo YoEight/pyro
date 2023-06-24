@@ -1032,6 +1032,15 @@ impl<'a> TypeBuilder<'a> {
             inner: self,
         })
     }
+
+    pub fn type_constructor(self, name: impl AsRef<str>) -> eyre::Result<TypeConstrBuilder<'a>> {
+        let constr = self.look_up(name.as_ref())?;
+
+        Ok(TypeConstrBuilder {
+            constr,
+            inner: self,
+        })
+    }
 }
 
 pub struct FuncBuilder<'a> {
@@ -1074,6 +1083,27 @@ impl<'a> FuncBuilder<'a> {
         }
 
         Ok(acc)
+    }
+}
+
+pub struct TypeConstrBuilder<'a> {
+    constr: TypePointer,
+    inner: TypeBuilder<'a>,
+}
+
+impl<'a> TypeConstrBuilder<'a> {
+    pub fn inner_type_of<T: PyroType>(self) -> eyre::Result<TypePointer>
+    where
+        T: Sized,
+    {
+        let inner_type = T::r#type(&self.inner)?;
+
+        Ok(TypePointer::app(self.constr, inner_type))
+    }
+
+    pub fn inner_type_name(self, name: impl AsRef<str>) -> eyre::Result<TypePointer> {
+        let inner_type = self.inner.look_up(name)?;
+        Ok(TypePointer::app(self.constr, inner_type))
     }
 }
 
@@ -1181,13 +1211,13 @@ fn test_type_check_client_easy() {
 fn test_type_check_generic() {
     let mut know = Knowledge::standard();
     let scope = know.new_scope(&STDLIB);
-    let var = know.declare_from_dict(&scope, "a", Dict::new(Type::named("z")));
+    let var = know.declare_from_dict(&scope, "'a", Dict::new(Type::named("'a")));
     let target_type = TypePointer::app(
         know.client_pointer(),
         TypePointer::ForAll(
             false,
             scope,
-            vec!["a".to_string()],
+            vec!["'a".to_string()],
             Box::new(TypePointer::Qual(
                 vec![TypePointer::app(know.show_pointer(), var.clone())],
                 Box::new(var),
@@ -1203,13 +1233,13 @@ fn test_type_check_generic() {
 fn test_type_check_generic_complex() {
     let mut know = Knowledge::standard();
     let scope = know.new_scope(&STDLIB);
-    let var = know.declare_from_dict(&scope, "a", Dict::new(Type::named("z")));
+    let var = know.declare_from_dict(&scope, "'a", Dict::new(Type::named("'a")));
     let target_type = TypePointer::app(
         know.client_pointer(),
         TypePointer::rec(vec![Prop::ano(TypePointer::ForAll(
             false,
             scope,
-            vec!["a".to_string()],
+            vec!["'a".to_string()],
             Box::new(TypePointer::Qual(
                 vec![TypePointer::app(know.show_pointer(), var.clone())],
                 Box::new(var),
