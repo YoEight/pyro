@@ -424,6 +424,10 @@ impl Knowledge {
         self.look_up(&STDLIB, "Char").unwrap()
     }
 
+    pub fn type_builder(&mut self) -> TypeBuilder {
+        TypeBuilder { know: self }
+    }
+
     pub fn declare<S: Scope>(
         &mut self,
         scope: &S,
@@ -921,6 +925,224 @@ impl Knowledge {
         }
 
         table
+    }
+}
+
+pub trait PyroType {
+    fn r#type(builder: &TypeBuilder) -> eyre::Result<TypePointer>
+    where
+        Self: Sized;
+}
+
+impl PyroType for i64 {
+    fn r#type(builder: &TypeBuilder) -> eyre::Result<TypePointer> {
+        builder.look_up("Integer")
+    }
+}
+
+impl PyroType for char {
+    fn r#type(builder: &TypeBuilder) -> eyre::Result<TypePointer> {
+        builder.look_up("Char")
+    }
+}
+
+impl PyroType for bool {
+    fn r#type(builder: &TypeBuilder) -> eyre::Result<TypePointer> {
+        builder.look_up("Bool")
+    }
+}
+
+impl PyroType for String {
+    fn r#type(builder: &TypeBuilder) -> eyre::Result<TypePointer> {
+        builder.look_up("String")
+    }
+}
+
+pub struct TypeBuilder<'a> {
+    know: &'a mut Knowledge,
+}
+
+impl<'a> TypeBuilder<'a> {
+    pub fn new(know: &'a mut Knowledge) -> TypeBuilder<'a> {
+        Self { know }
+    }
+
+    pub fn look_up(&self, name: impl AsRef<str>) -> eyre::Result<TypePointer> {
+        if let Some(pointer) = self.know.look_up(&STDLIB, name.as_ref()) {
+            return Ok(pointer.clone());
+        }
+
+        eyre::bail!("Type {} doesn't exist", name.as_ref())
+    }
+
+    pub fn for_all(self, var_name: impl AsRef<str>) -> ForAllVarBuilder<'a> {
+        let binders = vec![var_name.as_ref().to_string()];
+        let scope = self.know.new_scope(&STDLIB);
+        let var_dict = Dict::new(Type::named(var_name.as_ref()));
+        let var = self
+            .know
+            .declare_from_dict(&scope, var_name.as_ref(), var_dict);
+        let mut vars = HashMap::new();
+
+        vars.insert(var_name.as_ref().to_string(), var.clone());
+
+        let for_all = ForAllBuilder {
+            inner: self,
+            scope,
+            binders,
+            constraints: vec![],
+            vars,
+        };
+
+        ForAllVarBuilder {
+            var,
+            inner: for_all,
+        }
+    }
+
+    pub fn named(self, name: impl AsRef<str>) -> eyre::Result<TypePointer> {
+        if let Some(pointer) = self.know.look_up(&STDLIB, name.as_ref()) {
+            return Ok(pointer.clone());
+        }
+
+        eyre::bail!("Type '{}' doesn't exist", name.as_ref())
+    }
+
+    pub fn of<T: PyroType>(&self) -> eyre::Result<TypePointer> {
+        T::r#type(self)
+    }
+
+    pub fn func_of<T: PyroType>(self) -> eyre::Result<FuncBuilder<'a>>
+    where
+        T: Sized,
+    {
+        let param = T::r#type(&self)?;
+
+        Ok(FuncBuilder {
+            apps: vec![param],
+            inner: self,
+        })
+    }
+
+    pub fn func_type(self, name: impl AsRef<str>) -> eyre::Result<FuncBuilder<'a>> {
+        let param = self.look_up(name)?;
+
+        Ok(FuncBuilder {
+            apps: vec![param],
+            inner: self,
+        })
+    }
+}
+
+pub struct FuncBuilder<'a> {
+    apps: Vec<TypePointer>,
+    inner: TypeBuilder<'a>,
+}
+
+impl<'a> FuncBuilder<'a> {
+    pub fn param_of<T: PyroType>(mut self) -> eyre::Result<Self>
+    where
+        T: Sized,
+    {
+        self.apps.push(T::r#type(&self.inner)?);
+        Ok(self)
+    }
+
+    pub fn param(mut self, name: impl AsRef<str>) -> eyre::Result<Self> {
+        self.apps.push(self.inner.look_up(name)?);
+        Ok(self)
+    }
+
+    pub fn result(mut self, name: impl AsRef<str>) -> eyre::Result<TypePointer> {
+        let mut acc = self.inner.look_up(name)?;
+
+        while let Some(param) = self.apps.pop() {
+            acc = TypePointer::fun(param, acc);
+        }
+
+        Ok(acc)
+    }
+
+    pub fn result_of<T: PyroType>(mut self) -> eyre::Result<TypePointer>
+    where
+        T: Sized,
+    {
+        let mut acc = T::r#type(&self.inner)?;
+
+        while let Some(param) = self.apps.pop() {
+            acc = TypePointer::fun(param, acc);
+        }
+
+        Ok(acc)
+    }
+}
+
+pub struct ForAllBuilder<'a> {
+    inner: TypeBuilder<'a>,
+    scope: LocalScope,
+    binders: Vec<String>,
+    constraints: Vec<TypePointer>,
+    vars: HashMap<String, TypePointer>,
+}
+
+impl<'a> ForAllBuilder<'a> {
+    pub fn add_var(mut self, var_name: impl AsRef<str>) -> ForAllVarBuilder<'a> {
+        let scope = self.scope.clone();
+        let var_dict = Dict::new(Type::named(var_name.as_ref()));
+        let var = self
+            .inner
+            .know
+            .declare_from_dict(&scope, var_name.as_ref(), var_dict);
+
+        self.binders.push(var_name.as_ref().to_string());
+        self.vars.insert(var_name.as_ref().to_string(), var.clone());
+
+        ForAllVarBuilder { var, inner: self }
+    }
+
+    pub fn body(self, var_name: impl AsRef<str>) -> eyre::Result<TypePointer> {
+        if let Some(pointer) = self.vars.get(var_name.as_ref()) {
+            let body = if self.constraints.is_empty() {
+                pointer.clone()
+            } else {
+                TypePointer::Qual(self.constraints, Box::new(pointer.clone()))
+            };
+
+            return Ok(TypePointer::ForAll(
+                false,
+                self.scope,
+                self.binders,
+                Box::new(body),
+            ));
+        }
+
+        eyre::bail!(
+            "Type variable {} doesn't exist in this forall type expression",
+            var_name.as_ref()
+        )
+    }
+}
+
+pub struct ForAllVarBuilder<'a> {
+    var: TypePointer,
+    inner: ForAllBuilder<'a>,
+}
+
+impl<'a> ForAllVarBuilder<'a> {
+    pub fn done(self) -> ForAllBuilder<'a> {
+        self.inner
+    }
+
+    pub fn add_constraint(mut self, constraint: impl AsRef<str>) -> eyre::Result<Self> {
+        if let Some(constr) = self.inner.inner.know.look_up(&STDLIB, constraint.as_ref()) {
+            self.inner
+                .constraints
+                .push(TypePointer::app(constr, self.var.clone()));
+
+            return Ok(self);
+        }
+
+        eyre::bail!("Constraint '{}' doesn't exist", constraint.as_ref())
     }
 }
 

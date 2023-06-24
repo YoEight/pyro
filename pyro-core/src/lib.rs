@@ -14,7 +14,10 @@ mod typing;
 mod utils;
 
 pub use crate::infer::{infer_decl, infer_program, infer_val};
-pub use crate::typing::{Dict, Knowledge, Type, TypePointer, TypeRef, UsedVariables};
+pub use crate::typing::{
+    Dict, ForAllBuilder, ForAllVarBuilder, FuncBuilder, Knowledge, PyroType, Type, TypeBuilder,
+    TypePointer, TypeRef, UsedVariables,
+};
 pub use context::{LocalScope, Scope, STDLIB};
 
 /// Location in input string

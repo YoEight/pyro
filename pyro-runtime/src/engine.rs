@@ -4,7 +4,7 @@ use crate::value::{Channel, RuntimeValue};
 use crate::PyroLiteral;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Dict, Knowledge, LocalScope, Type, TypePointer, STDLIB};
+use pyro_core::{Dict, Knowledge, TypePointer, STDLIB};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -36,111 +36,12 @@ impl Default for EngineBuilder {
     }
 }
 
-pub struct TypeBuilder<'a> {
-    know: &'a mut Knowledge,
-}
-
-impl<'a> TypeBuilder<'a> {
-    pub fn new(know: &'a mut Knowledge) -> TypeBuilder<'a> {
-        Self { know }
-    }
-
-    pub fn for_all(self, var_name: impl AsRef<str>) -> ForAllVarBuilder<'a> {
-        let binders = vec![var_name.as_ref().to_string()];
-        let scope = self.know.new_scope(&STDLIB);
-        let var_dict = Dict::new(Type::named(var_name.as_ref()));
-        let var = self
-            .know
-            .declare_from_dict(&scope, var_name.as_ref(), var_dict);
-        let mut vars = HashMap::new();
-
-        vars.insert(var_name.as_ref().to_string(), var.clone());
-
-        let for_all = ForAllBuilder {
-            know: self.know,
-            scope,
-            binders,
-            constraints: vec![],
-            vars,
-        };
-
-        ForAllVarBuilder {
-            var,
-            inner: for_all,
-        }
-    }
-}
-
-pub struct ForAllBuilder<'a> {
-    know: &'a mut Knowledge,
-    scope: LocalScope,
-    binders: Vec<String>,
-    constraints: Vec<TypePointer>,
-    vars: HashMap<String, TypePointer>,
-}
-
-impl<'a> ForAllBuilder<'a> {
-    pub fn add_var(mut self, var_name: impl AsRef<str>) -> ForAllVarBuilder<'a> {
-        let scope = self.scope.clone();
-        let var_dict = Dict::new(Type::named(var_name.as_ref()));
-        let var = self
-            .know
-            .declare_from_dict(&scope, var_name.as_ref(), var_dict);
-
-        self.binders.push(var_name.as_ref().to_string());
-        self.vars.insert(var_name.as_ref().to_string(), var.clone());
-
-        ForAllVarBuilder { var, inner: self }
-    }
-
-    pub fn body(self, var_name: impl AsRef<str>) -> eyre::Result<TypePointer> {
-        if let Some(pointer) = self.vars.get(var_name.as_ref()) {
-            let body = if self.constraints.is_empty() {
-                pointer.clone()
-            } else {
-                TypePointer::Qual(self.constraints, Box::new(pointer.clone()))
-            };
-
-            return Ok(TypePointer::ForAll(
-                false,
-                self.scope,
-                self.binders,
-                Box::new(body),
-            ));
-        }
-
-        eyre::bail!(
-            "Type variable {} doesn't exist in this forall type expression",
-            var_name.as_ref()
-        )
-    }
-}
-
-pub struct ForAllVarBuilder<'a> {
-    var: TypePointer,
-    inner: ForAllBuilder<'a>,
-}
-
-impl<'a> ForAllVarBuilder<'a> {
-    pub fn done(self) -> ForAllBuilder<'a> {
-        self.inner
-    }
-
-    pub fn add_constraint(mut self, constraint: impl AsRef<str>) -> eyre::Result<Self> {
-        if let Some(constr) = self.inner.know.look_up(&STDLIB, constraint.as_ref()) {
-            self.inner
-                .constraints
-                .push(TypePointer::app(constr, self.var.clone()));
-
-            return Ok(self);
-        }
-
-        eyre::bail!("Constraint '{}' doesn't exist", constraint.as_ref())
-    }
-}
-
 impl EngineBuilder {
-    pub fn register_function_2<F, A, B, C>(mut self, name: impl AsRef<str>, func: F) -> Self
+    pub fn register_function_2<F, A, B, C>(
+        mut self,
+        name: impl AsRef<str>,
+        func: F,
+    ) -> eyre::Result<Self>
     where
         F: Fn(A, B) -> C + Send + Sync + 'static,
         A: PyroLiteral,
@@ -169,10 +70,17 @@ impl EngineBuilder {
             })
         }));
 
-        let r#type = TypePointer::fun(A::r#type(), TypePointer::fun(B::r#type(), C::r#type()));
+        let r#type = self
+            .knowledge
+            .type_builder()
+            .func_of::<A>()?
+            .param_of::<B>()?
+            .result_of::<C>()?;
+
         self.knowledge.declare_from_pointer(&STDLIB, &name, r#type);
         self.runtime_values.insert(name.as_ref().to_string(), value);
-        self
+
+        Ok(self)
     }
 
     pub fn register_type(mut self, name: impl AsRef<str>, dict: Dict) -> Self {
@@ -185,14 +93,14 @@ impl EngineBuilder {
         self
     }
 
-    pub fn stdlib(mut self, env: Env) -> Self {
-        let print_param_type = TypeBuilder::new(&mut self.knowledge)
+    pub fn stdlib(mut self, env: Env) -> eyre::Result<Self> {
+        let print_param_type = self
+            .knowledge
+            .type_builder()
             .for_all("'a")
-            .add_constraint("Show")
-            .unwrap()
+            .add_constraint("Show")?
             .done()
-            .body("'a")
-            .unwrap();
+            .body("'a")?;
 
         self.knowledge.declare_from_pointer(
             &STDLIB,
@@ -207,15 +115,15 @@ impl EngineBuilder {
 
         self.env = Some(env);
 
-        self.register_function_2("+", |a: i64, b: i64| a + b)
-            .register_function_2("-", |a: i64, b: i64| a - b)
-            .register_function_2("*", |a: i64, b: i64| a * b)
-            .register_function_2("<=", |a: i64, b: i64| a <= b)
-            .register_function_2("<", |a: i64, b: i64| a < b)
-            .register_function_2(">=", |a: i64, b: i64| a >= b)
-            .register_function_2(">", |a: i64, b: i64| a > b)
-            .register_function_2("==", |a: i64, b: i64| a == b)
-            .register_function_2("&&", |a, b| a && b)
+        self.register_function_2("+", |a: i64, b: i64| a + b)?
+            .register_function_2("-", |a: i64, b: i64| a - b)?
+            .register_function_2("*", |a: i64, b: i64| a * b)?
+            .register_function_2("<=", |a: i64, b: i64| a <= b)?
+            .register_function_2("<", |a: i64, b: i64| a < b)?
+            .register_function_2(">=", |a: i64, b: i64| a >= b)?
+            .register_function_2(">", |a: i64, b: i64| a > b)?
+            .register_function_2("==", |a: i64, b: i64| a == b)?
+            .register_function_2("&&", |a, b| a && b)?
             .register_function_2("||", |a, b| a || b)
     }
 

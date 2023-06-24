@@ -2,18 +2,16 @@ use futures::future::BoxFuture;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Record, Tag};
 use pyro_core::sym::Literal;
-use pyro_core::{TypePointer, TypeRef, STDLIB};
+use pyro_core::PyroType;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, Mutex};
 
-pub trait PyroLiteral {
+pub trait PyroLiteral: PyroType {
     fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized;
-
-    fn r#type() -> TypePointer;
 
     fn value(self) -> RuntimeValue;
 }
@@ -28,13 +26,6 @@ impl PyroLiteral for i64 {
         }
 
         eyre::bail!("Expected an u64 runtime value")
-    }
-
-    fn r#type() -> TypePointer {
-        TypePointer::Ref(TypeRef {
-            scope: STDLIB.as_local_scope(),
-            name: "Integer".to_string(),
-        })
     }
 
     fn value(self) -> RuntimeValue {
@@ -54,13 +45,6 @@ impl PyroLiteral for char {
         eyre::bail!("Expected a char runtime value")
     }
 
-    fn r#type() -> TypePointer {
-        TypePointer::Ref(TypeRef {
-            scope: STDLIB.as_local_scope(),
-            name: "Char".to_string(),
-        })
-    }
-
     fn value(self) -> RuntimeValue {
         RuntimeValue::Literal(Literal::Char(self))
     }
@@ -78,13 +62,6 @@ impl PyroLiteral for String {
         eyre::bail!("Expected a char runtime value")
     }
 
-    fn r#type() -> TypePointer {
-        TypePointer::Ref(TypeRef {
-            scope: STDLIB.as_local_scope(),
-            name: "String".to_string(),
-        })
-    }
-
     fn value(self) -> RuntimeValue {
         RuntimeValue::Literal(Literal::String(self))
     }
@@ -100,13 +77,6 @@ impl PyroLiteral for bool {
         }
 
         eyre::bail!("Expected a bool runtime value")
-    }
-
-    fn r#type() -> TypePointer {
-        TypePointer::Ref(TypeRef {
-            scope: STDLIB.as_local_scope(),
-            name: "Bool".to_string(),
-        })
     }
 
     fn value(self) -> RuntimeValue {
