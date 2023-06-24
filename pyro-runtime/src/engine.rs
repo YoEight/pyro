@@ -95,6 +95,20 @@ impl EngineBuilder {
         Ok(self)
     }
 
+    pub fn register_value<T: PyroLiteral>(
+        mut self,
+        name: impl AsRef<str>,
+        value: T,
+    ) -> eyre::Result<Self> {
+        let pointer = T::r#type(&self.knowledge.type_builder())?;
+        self.knowledge
+            .declare_from_pointer(&STDLIB, name.as_ref(), pointer);
+        self.runtime_values
+            .insert(name.as_ref().to_string(), value.value());
+
+        Ok(self)
+    }
+
     pub fn env(mut self, env: Env) -> Self {
         self.env = Some(env);
         self
