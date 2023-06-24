@@ -8,16 +8,16 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, Mutex};
 
-pub trait PyroLiteral: PyroType {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+pub trait PyroValue: PyroType {
+    fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized;
 
-    fn value(self) -> RuntimeValue;
+    fn serialize(self) -> eyre::Result<RuntimeValue>;
 }
 
-impl PyroLiteral for i64 {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+impl PyroValue for i64 {
+    fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
     {
@@ -28,13 +28,13 @@ impl PyroLiteral for i64 {
         eyre::bail!("Expected an u64 runtime value")
     }
 
-    fn value(self) -> RuntimeValue {
-        RuntimeValue::Literal(Literal::Integer(self))
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        Ok(RuntimeValue::Literal(Literal::Integer(self)))
     }
 }
 
-impl PyroLiteral for char {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+impl PyroValue for char {
+    fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
     {
@@ -45,13 +45,13 @@ impl PyroLiteral for char {
         eyre::bail!("Expected a char runtime value")
     }
 
-    fn value(self) -> RuntimeValue {
-        RuntimeValue::Literal(Literal::Char(self))
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        Ok(RuntimeValue::Literal(Literal::Char(self)))
     }
 }
 
-impl PyroLiteral for String {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+impl PyroValue for String {
+    fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
     {
@@ -62,13 +62,13 @@ impl PyroLiteral for String {
         eyre::bail!("Expected a char runtime value")
     }
 
-    fn value(self) -> RuntimeValue {
-        RuntimeValue::Literal(Literal::String(self))
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        Ok(RuntimeValue::Literal(Literal::String(self)))
     }
 }
 
-impl PyroLiteral for bool {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+impl PyroValue for bool {
+    fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
     {
@@ -79,8 +79,8 @@ impl PyroLiteral for bool {
         eyre::bail!("Expected a bool runtime value")
     }
 
-    fn value(self) -> RuntimeValue {
-        RuntimeValue::Literal(Literal::Bool(self))
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        Ok(RuntimeValue::Literal(Literal::Bool(self)))
     }
 }
 

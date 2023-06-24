@@ -1,7 +1,7 @@
 use crate::env::Env;
 use crate::runtime::Runtime;
 use crate::value::{Channel, RuntimeValue};
-use crate::PyroLiteral;
+use crate::PyroValue;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
 use pyro_core::{Knowledge, PyroType, TypePointer, STDLIB};
@@ -44,9 +44,9 @@ impl EngineBuilder {
     ) -> eyre::Result<Self>
     where
         F: Fn(A, B) -> C + Send + Sync + 'static,
-        A: PyroLiteral,
-        B: PyroLiteral,
-        C: PyroLiteral,
+        A: PyroValue,
+        B: PyroValue,
+        C: PyroValue,
     {
         let func = Arc::new(func);
         let value = RuntimeValue::Fun(Arc::new(move |a| {
@@ -61,10 +61,10 @@ impl EngineBuilder {
                     let func_local_3 = func_local_2.clone();
                     Box::pin(async move {
                         Ok(func_local_3(
-                            PyroLiteral::try_from_value(a_2.clone())?,
-                            PyroLiteral::try_from_value(b.clone())?,
+                            PyroValue::deserialize(a_2.clone())?,
+                            PyroValue::deserialize(b.clone())?,
                         )
-                        .value())
+                        .serialize()?)
                     })
                 })))
             })
@@ -95,7 +95,7 @@ impl EngineBuilder {
         Ok(self)
     }
 
-    pub fn register_value<T: PyroLiteral>(
+    pub fn register_value<T: PyroValue>(
         mut self,
         name: impl AsRef<str>,
         value: T,
@@ -104,7 +104,7 @@ impl EngineBuilder {
         self.knowledge
             .declare_from_pointer(&STDLIB, name.as_ref(), pointer);
         self.runtime_values
-            .insert(name.as_ref().to_string(), value.value());
+            .insert(name.as_ref().to_string(), value.serialize()?);
 
         Ok(self)
     }
