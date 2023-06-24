@@ -1105,6 +1105,57 @@ impl<'a> TypeConstrBuilder<'a> {
         let inner_type = self.inner.look_up(name)?;
         Ok(TypePointer::app(self.constr, inner_type))
     }
+
+    pub fn for_all(self, var_name: impl AsRef<str>) -> TypeConstrForAllVarBuilder<'a> {
+        let scope = self.inner.know.new_scope(&STDLIB);
+        let var_dict = Dict::new(Type::named(var_name.as_ref()));
+        let var = self
+            .inner
+            .know
+            .declare_from_dict(&scope, var_name.as_ref(), var_dict);
+
+        TypeConstrForAllVarBuilder {
+            inner: self.inner,
+            scope,
+            constraints: vec![],
+            var_name: var_name.as_ref().to_string(),
+            var,
+            constr: self.constr,
+        }
+    }
+}
+
+pub struct TypeConstrForAllVarBuilder<'a> {
+    inner: TypeBuilder<'a>,
+    scope: LocalScope,
+    constraints: Vec<TypePointer>,
+    var_name: String,
+    var: TypePointer,
+    constr: TypePointer,
+}
+
+impl<'a> TypeConstrForAllVarBuilder<'a> {
+    pub fn add_constraint(mut self, constraint: impl AsRef<str>) -> eyre::Result<Self> {
+        let constr = self.inner.look_up(constraint)?;
+
+        self.constraints
+            .push(TypePointer::app(constr, self.var.clone()));
+
+        Ok(self)
+    }
+
+    pub fn done(self) -> TypePointer {
+        let body = if self.constraints.is_empty() {
+            self.var
+        } else {
+            TypePointer::Qual(self.constraints, Box::new(self.var.clone()))
+        };
+
+        TypePointer::app(
+            self.constr,
+            TypePointer::ForAll(false, self.scope, vec![self.var_name], Box::new(body)),
+        )
+    }
 }
 
 pub struct ForAllBuilder<'a> {

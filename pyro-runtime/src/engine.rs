@@ -4,7 +4,7 @@ use crate::value::{Channel, RuntimeValue};
 use crate::PyroLiteral;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Dict, Knowledge, TypePointer, STDLIB};
+use pyro_core::{Dict, Knowledge, STDLIB};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -94,19 +94,16 @@ impl EngineBuilder {
     }
 
     pub fn stdlib(mut self, env: Env) -> eyre::Result<Self> {
-        let print_param_type = self
+        let print_type = self
             .knowledge
             .type_builder()
+            .type_constructor("Client")?
             .for_all("'a")
             .add_constraint("Show")?
-            .done()
-            .body("'a")?;
+            .done();
 
-        self.knowledge.declare_from_pointer(
-            &STDLIB,
-            "print",
-            TypePointer::app(self.knowledge.client_pointer(), print_param_type),
-        );
+        self.knowledge
+            .declare_from_pointer(&STDLIB, "print", print_type);
 
         self.runtime_values.insert(
             "print".to_string(),
