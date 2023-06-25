@@ -23,5 +23,5 @@ async fn main() -> eyre::Result<()> {
     }
 
     let engine = Engine::builder().stdlib(Env::stdio())?.build();
-    engine.run(source.as_str()).await
+    engine.compile(source.as_str())?.run().await
 }

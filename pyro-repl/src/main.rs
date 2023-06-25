@@ -85,8 +85,13 @@ async fn main() -> eyre::Result<()> {
             Input::String(s) => {
                 let source = format!("run {}", s);
 
-                if let Err(e) = engine.clone().run(source.as_str()).await {
-                    println!("ERR: {}", e);
+                match engine.compile(source.as_str()) {
+                    Err(e) => println!("Compilation error: {}", e),
+                    Ok(process) => {
+                        if let Err(e) = process.run().await {
+                            println!("ERR: {}", e);
+                        }
+                    }
                 }
             }
         }

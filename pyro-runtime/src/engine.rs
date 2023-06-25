@@ -207,13 +207,28 @@ impl Engine {
         &mut self.runtime
     }
 
-    pub async fn run(mut self, source_code: &str) -> eyre::Result<()> {
-        let progs = pyro_core::parse(&mut self.context(), source_code)?;
-        self.runtime.used = self.context().build_used_variables_table();
+    pub fn compile(&self, source_code: &str) -> eyre::Result<PyroProcess> {
+        let mut this = self.clone();
+        let program = pyro_core::parse(&mut this.context(), source_code)?;
+
+        Ok(PyroProcess {
+            runtime: self.runtime.clone(),
+            program,
+        })
+    }
+}
+
+pub struct PyroProcess {
+    runtime: Runtime,
+    program: Vec<Tag<Proc<Ann>, Ann>>,
+}
+
+impl PyroProcess {
+    pub async fn run(self) -> eyre::Result<()> {
         let mut work_items = Vec::new();
         let (sender, mut mailbox) = mpsc::unbounded_channel::<Msg>();
 
-        for tag in progs {
+        for tag in self.program {
             work_items.push(Suspend {
                 runtime: self.runtime.clone(),
                 proc: tag,
