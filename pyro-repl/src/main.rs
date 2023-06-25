@@ -39,7 +39,7 @@ async fn main() -> eyre::Result<()> {
         .version("master");
 
     let mut inputs = glyph::file_backed_inputs(options, ".pyro-repl")?;
-    let mut engine = EngineBuilder::default().stdlib(Env::stdio())?.build();
+    let mut engine = EngineBuilder::default().stdlib(Env::stdio()).build()?;
 
     while let Some(input) = inputs.next_input()? {
         match input {

@@ -2,11 +2,40 @@ use futures::future::BoxFuture;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Record, Tag};
 use pyro_core::sym::Literal;
-use pyro_core::PyroType;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, Mutex};
+
+use crate::helpers::{Declared, TypeBuilder};
+
+pub trait PyroType {
+    fn r#type(builder: TypeBuilder) -> Declared;
+}
+
+impl PyroType for i64 {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.of("Integer")
+    }
+}
+
+impl PyroType for char {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.of("Char")
+    }
+}
+
+impl PyroType for bool {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.of("Bool")
+    }
+}
+
+impl PyroType for String {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.of("String")
+    }
+}
 
 pub trait PyroValue: PyroType {
     fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>

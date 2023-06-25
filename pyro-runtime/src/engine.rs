@@ -1,10 +1,11 @@
 use crate::env::Env;
+use crate::helpers::{Declared, InnerType, TypeBuilder, TypeCommand};
 use crate::runtime::Runtime;
-use crate::value::{Channel, RuntimeValue};
+use crate::value::{Channel, PyroType, RuntimeValue};
 use crate::PyroValue;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Knowledge, PyroType, TypePointer, STDLIB};
+use pyro_core::{Dict, Knowledge, Type, TypePointer, STDLIB};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -19,58 +20,59 @@ enum Msg {
     Completed(u64),
 }
 
-#[derive(Clone)]
+enum Command {
+    CreateType {
+        name: String,
+        command: TypeCommand,
+    },
+
+    CreateSymbol {
+        name: String,
+        r#type: Declared,
+        repr: RuntimeValue,
+    },
+}
+
 pub struct EngineBuilder {
-    knowledge: Knowledge,
-    runtime_values: HashMap<String, RuntimeValue>,
+    commands: Vec<Command>,
     env: Option<Env>,
 }
 
 impl Default for EngineBuilder {
     fn default() -> Self {
         Self {
-            knowledge: Knowledge::standard(),
-            runtime_values: Default::default(),
+            commands: vec![],
             env: None,
         }
     }
 }
 
 impl EngineBuilder {
-    pub fn register_function<F, A, B>(
-        mut self,
-        name: impl AsRef<str>,
-        func: F,
-    ) -> eyre::Result<Self>
+    pub fn register_function<F, A, B>(mut self, name: impl AsRef<str>, func: F) -> Self
     where
         F: Fn(A) -> B + Send + Sync + 'static,
         A: PyroValue,
         B: PyroValue,
     {
         let func = Arc::new(func);
-        let value = RuntimeValue::Fun(Arc::new(move |a| {
+        let repr = RuntimeValue::Fun(Arc::new(move |a| {
             let a = Arc::new(a);
             let func_local = func.clone();
             Box::pin(async move { Ok(func_local(PyroValue::deserialize(a.clone())?).serialize()?) })
         }));
 
-        let r#type = self
-            .knowledge
-            .type_builder()
-            .func_of::<A>()?
-            .result_of::<B>()?;
+        let r#type = TypeBuilder(()).func_of::<A>().result_of::<B>();
 
-        self.knowledge.declare_from_pointer(&STDLIB, &name, r#type);
-        self.runtime_values.insert(name.as_ref().to_string(), value);
+        self.commands.push(Command::CreateSymbol {
+            name: name.as_ref().to_string(),
+            r#type,
+            repr,
+        });
 
-        Ok(self)
+        self
     }
 
-    pub fn register_function_2<F, A, B, C>(
-        mut self,
-        name: impl AsRef<str>,
-        func: F,
-    ) -> eyre::Result<Self>
+    pub fn register_function_2<F, A, B, C>(mut self, name: impl AsRef<str>, func: F) -> Self
     where
         F: Fn(A, B) -> C + Send + Sync + 'static,
         A: PyroValue,
@@ -78,7 +80,7 @@ impl EngineBuilder {
         C: PyroValue,
     {
         let func = Arc::new(func);
-        let value = RuntimeValue::Fun(Arc::new(move |a| {
+        let repr = RuntimeValue::Fun(Arc::new(move |a| {
             let a = Arc::new(a);
             let func_local_1 = func.clone();
             Box::pin(async move {
@@ -99,43 +101,38 @@ impl EngineBuilder {
             })
         }));
 
-        let r#type = self
-            .knowledge
-            .type_builder()
-            .func_of::<A>()?
-            .param_of::<B>()?
-            .result_of::<C>()?;
+        let r#type = TypeBuilder(())
+            .func_of::<A>()
+            .param_of::<B>()
+            .result_of::<C>();
 
-        self.knowledge.declare_from_pointer(&STDLIB, &name, r#type);
-        self.runtime_values.insert(name.as_ref().to_string(), value);
+        self.commands.push(Command::CreateSymbol {
+            name: name.as_ref().to_string(),
+            r#type,
+            repr,
+        });
 
-        Ok(self)
+        self
     }
 
-    pub fn register_type<T: PyroType>(mut self, name: impl AsRef<str>) -> eyre::Result<Self> {
-        let pointer = T::r#type(&self.knowledge.type_builder())?;
-
-        if let TypePointer::Ref(_) = &pointer {
-            return Ok(self);
-        } else {
-            self.knowledge.declare_from_pointer(&STDLIB, name, pointer);
-        }
-
-        Ok(self)
+    pub fn register_type<T: PyroType>(mut self, name: impl AsRef<str>) -> Self {
+        self.commands.push(Command::CreateType {
+            name: name.as_ref().to_string(),
+            command: T::r#type(TypeBuilder(())).0,
+        });
+        self
     }
 
-    pub fn register_value<T: PyroValue>(
-        mut self,
-        name: impl AsRef<str>,
-        value: T,
-    ) -> eyre::Result<Self> {
-        let pointer = T::r#type(&self.knowledge.type_builder())?;
-        self.knowledge
-            .declare_from_pointer(&STDLIB, name.as_ref(), pointer);
-        self.runtime_values
-            .insert(name.as_ref().to_string(), value.serialize()?);
+    pub fn register_value<T: PyroValue>(mut self, name: impl AsRef<str>, value: T) -> Self {
+        self.commands.push(Command::CreateSymbol {
+            name: name.as_ref().to_string(),
+            r#type: T::r#type(TypeBuilder(())),
+            repr: value.serialize().expect(
+                "We expect register_value to not fail when serializing into a runtime value",
+            ),
+        });
 
-        Ok(self)
+        self
     }
 
     pub fn env(mut self, env: Env) -> Self {
@@ -143,47 +140,165 @@ impl EngineBuilder {
         self
     }
 
-    pub fn stdlib(mut self, env: Env) -> eyre::Result<Self> {
-        let print_type = self
-            .knowledge
-            .type_builder()
-            .type_constructor("Client")?
-            .for_all("'a")
-            .add_constraint("Show")?
+    pub fn stdlib(mut self, env: Env) -> Self {
+        let print_type = TypeBuilder(())
+            .constr("Client")
+            .for_all_type()
+            .with_constraint("Show")
             .done();
 
-        self.knowledge
-            .declare_from_pointer(&STDLIB, "print", print_type);
-
-        self.runtime_values.insert(
-            "print".to_string(),
-            RuntimeValue::Channel(Channel::Client(env.stdout())),
-        );
+        self.commands.push(Command::CreateSymbol {
+            name: "print".to_string(),
+            r#type: print_type,
+            repr: RuntimeValue::Channel(Channel::Client(env.stdout())),
+        });
 
         self.env = Some(env);
 
-        self.register_function_2("+", |a: i64, b: i64| a + b)?
-            .register_function_2("-", |a: i64, b: i64| a - b)?
-            .register_function_2("*", |a: i64, b: i64| a * b)?
-            .register_function_2("<=", |a: i64, b: i64| a <= b)?
-            .register_function_2("<", |a: i64, b: i64| a < b)?
-            .register_function_2(">=", |a: i64, b: i64| a >= b)?
-            .register_function_2(">", |a: i64, b: i64| a > b)?
-            .register_function_2("==", |a: i64, b: i64| a == b)?
-            .register_function_2("&&", |a, b| a && b)?
+        self.register_function_2("+", |a: i64, b: i64| a + b)
+            .register_function_2("-", |a: i64, b: i64| a - b)
+            .register_function_2("*", |a: i64, b: i64| a * b)
+            .register_function_2("<=", |a: i64, b: i64| a <= b)
+            .register_function_2("<", |a: i64, b: i64| a < b)
+            .register_function_2(">=", |a: i64, b: i64| a >= b)
+            .register_function_2(">", |a: i64, b: i64| a > b)
+            .register_function_2("==", |a: i64, b: i64| a == b)
+            .register_function_2("&&", |a, b| a && b)
             .register_function_2("||", |a, b| a || b)
     }
 
-    pub fn build(self) -> Engine {
+    pub fn build(self) -> eyre::Result<Engine> {
+        let mut runtime_values = HashMap::<String, RuntimeValue>::new();
+        let mut knowledge = Knowledge::standard();
+
+        for cmd in self.commands {
+            match cmd {
+                Command::CreateType { name, command } => {
+                    let pointer = handle_builder_type_command(&mut knowledge, command)?;
+                    knowledge.declare_from_pointer(&STDLIB, name, pointer);
+                }
+
+                Command::CreateSymbol { name, r#type, repr } => {
+                    let pointer = handle_builder_type_command(&mut knowledge, r#type.0)?;
+                    knowledge.declare_from_pointer(&STDLIB, name.as_str(), pointer);
+                    runtime_values.insert(name, repr);
+                }
+            }
+        }
+
         let runtime = Runtime {
             env: self.env,
-            variables: self.runtime_values,
+            variables: runtime_values,
             used: Default::default(),
         };
 
-        Engine {
-            runtime,
-            knowledge: self.knowledge,
+        Ok(Engine { runtime, knowledge })
+    }
+}
+
+fn handle_builder_type_command(
+    knowledge: &mut Knowledge,
+    cmd: TypeCommand,
+) -> eyre::Result<TypePointer> {
+    match cmd {
+        TypeCommand::LookUp(name) => match knowledge.look_up(&STDLIB, name.as_str()) {
+            Some(pointer) => Ok(pointer),
+            None => eyre::bail!("Type '{}' doesn't exist", name),
+        },
+
+        TypeCommand::CreateType { name, constraints } => Ok(knowledge.declare_from_dict(
+            &STDLIB,
+            name.as_str(),
+            Dict::with_impls(Type::named(name.as_str()), constraints),
+        )),
+
+        TypeCommand::CreateForAll { constraints } => {
+            let scope = knowledge.new_scope(&STDLIB);
+            let var = knowledge.new_generic(&scope);
+            let mut constraint_pointers = Vec::new();
+            let body = if constraints.is_empty() {
+                var.clone()
+            } else {
+                for constraint in constraints {
+                    if let Some(constraint) = knowledge.look_up(&STDLIB, &constraint) {
+                        constraint_pointers.push(TypePointer::app(constraint, var.clone()));
+                        continue;
+                    }
+
+                    eyre::bail!("Constraint '{}' doesn't exist", constraint);
+                }
+
+                TypePointer::Qual(constraint_pointers, Box::new(var.clone()))
+            };
+
+            Ok(TypePointer::ForAll(
+                false,
+                scope,
+                vec![var.as_type_ref().name.clone()],
+                Box::new(body),
+            ))
+        }
+
+        TypeCommand::CreateFunc { mut params } => {
+            let mut result = handle_builder_type_command(knowledge, params.pop().unwrap().0)?;
+
+            while let Some(param) = params.pop() {
+                result = TypePointer::fun(handle_builder_type_command(knowledge, param.0)?, result);
+            }
+
+            Ok(result)
+        }
+
+        TypeCommand::CreateTypeConstr { constr, inner_type } => {
+            let constr = if let Some(p) = knowledge.look_up(&STDLIB, &constr) {
+                p
+            } else {
+                eyre::bail!("Type constructor '{}' doesn't exist", constr);
+            };
+
+            let inner = match inner_type {
+                InnerType::Declared(cmd) => handle_builder_type_command(knowledge, *cmd)?,
+
+                InnerType::ForAll { constraints } => {
+                    let scope = knowledge.new_scope(&STDLIB);
+                    let var = knowledge.new_generic(&scope);
+                    let mut constraint_pointers = Vec::new();
+                    let body = if constraints.is_empty() {
+                        var.clone()
+                    } else {
+                        for constraint in constraints {
+                            if let Some(constraint) = knowledge.look_up(&STDLIB, &constraint) {
+                                constraint_pointers.push(TypePointer::app(constraint, var.clone()));
+                                continue;
+                            }
+
+                            eyre::bail!("Constraint '{}' doesn't exist", constraint);
+                        }
+
+                        TypePointer::Qual(constraint_pointers, Box::new(var.clone()))
+                    };
+
+                    TypePointer::ForAll(
+                        false,
+                        scope,
+                        vec![var.as_type_ref().name.clone()],
+                        Box::new(body),
+                    )
+                }
+            };
+
+            Ok(TypePointer::app(constr, inner))
+        }
+
+        TypeCommand::Rec { props } => {
+            let mut new_props = Vec::new();
+
+            for prop in props {
+                new_props
+                    .push(prop.traverse_result(|d| handle_builder_type_command(knowledge, d.0))?);
+            }
+
+            Ok(TypePointer::rec(new_props))
         }
     }
 }
