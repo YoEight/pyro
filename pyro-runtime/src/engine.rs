@@ -37,6 +37,35 @@ impl Default for EngineBuilder {
 }
 
 impl EngineBuilder {
+    pub fn register_function<F, A, B>(
+        mut self,
+        name: impl AsRef<str>,
+        func: F,
+    ) -> eyre::Result<Self>
+    where
+        F: Fn(A) -> B + Send + Sync + 'static,
+        A: PyroValue,
+        B: PyroValue,
+    {
+        let func = Arc::new(func);
+        let value = RuntimeValue::Fun(Arc::new(move |a| {
+            let a = Arc::new(a);
+            let func_local = func.clone();
+            Box::pin(async move { Ok(func_local(PyroValue::deserialize(a.clone())?).serialize()?) })
+        }));
+
+        let r#type = self
+            .knowledge
+            .type_builder()
+            .func_of::<A>()?
+            .result_of::<B>()?;
+
+        self.knowledge.declare_from_pointer(&STDLIB, &name, r#type);
+        self.runtime_values.insert(name.as_ref().to_string(), value);
+
+        Ok(self)
+    }
+
     pub fn register_function_2<F, A, B, C>(
         mut self,
         name: impl AsRef<str>,
