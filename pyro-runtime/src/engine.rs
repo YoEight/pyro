@@ -206,11 +206,16 @@ fn handle_builder_type_command(
             None => eyre::bail!("Type '{}' doesn't exist", name),
         },
 
-        TypeCommand::CreateType { name, constraints } => Ok(knowledge.declare_from_dict(
-            &STDLIB,
-            name.as_str(),
-            Dict::with_impls(Type::named(name.as_str()), constraints),
-        )),
+        TypeCommand::CreateType { name, constraints } => {
+            match knowledge.look_up(&STDLIB, name.as_str()) {
+                Some(p) => Ok(p),
+                None => Ok(knowledge.declare_from_dict(
+                    &STDLIB,
+                    name.as_str(),
+                    Dict::with_impls(Type::named(name.as_str()), constraints),
+                )),
+            }
+        }
 
         TypeCommand::CreateForAll { constraints } => {
             let scope = knowledge.new_scope(&STDLIB);
