@@ -838,10 +838,11 @@ impl Knowledge {
         loop {
             match current {
                 TypePointer::Ref(p) => {
-                    let suggested_dict = self.simplify_dict(r#type);
                     if let Some(dict) = self.dict(p) {
                         let mut dict = dict.borrow_mut();
                         if dict.is_generic() {
+                            let suggested_dict = self.simplify_dict(r#type);
+
                             if suggested_dict.is_generic() {
                                 dict.impls.extend(suggested_dict.impls);
                             } else {
@@ -850,6 +851,22 @@ impl Knowledge {
                                     .or_default()
                                     .symbols
                                     .insert(p.name.clone(), Either::Left(r#type.clone()));
+                            }
+                        } else if let TypePointer::Ref(suggested) = self.follow_link(r#type) {
+                            let suggested_dict = self.dict(&suggested).unwrap();
+                            let suggested_dict = suggested_dict.borrow();
+
+                            if suggested_dict.is_generic() {
+                                if suggested_dict.impls.is_subset(&dict.impls) {
+                                    self.dict_tables
+                                        .entry(suggested.scope.id())
+                                        .or_default()
+                                        .symbols
+                                        .insert(
+                                            suggested.name.clone(),
+                                            Either::Left(TypePointer::Ref(p.clone())),
+                                        );
+                                }
                             }
                         }
                     }
