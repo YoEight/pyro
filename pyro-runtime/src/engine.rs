@@ -175,7 +175,13 @@ impl EngineBuilder {
             match cmd {
                 Command::CreateType { name, command } => {
                     let pointer = handle_builder_type_command(&mut knowledge, command)?;
-                    knowledge.declare_from_pointer(&STDLIB, name, pointer);
+
+                    match &pointer {
+                        TypePointer::Ref(type_ref) if type_ref.name == name => {}
+                        _ => {
+                            knowledge.declare_from_pointer(&STDLIB, name, pointer);
+                        }
+                    }
                 }
 
                 Command::CreateSymbol { name, r#type, repr } => {
