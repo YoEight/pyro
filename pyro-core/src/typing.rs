@@ -516,13 +516,9 @@ impl Knowledge {
             let types = self.dict_tables.get(&current.scope.id()).unwrap();
             match types.symbols.get(&current.name).unwrap() {
                 Either::Left(next) => {
-                    let mut local = next;
-                    current = loop {
-                        match local {
-                            TypePointer::Ref(next) => break next,
-                            TypePointer::App(constr, _) => local = constr.as_ref(),
-                            _ => return None,
-                        }
+                    current = match next {
+                        TypePointer::Ref(next) => next,
+                        _ => return None,
                     };
                 }
 
@@ -853,6 +849,11 @@ impl Knowledge {
                                     .insert(p.name.clone(), Either::Left(r#type.clone()));
                             }
                         } else if let TypePointer::Ref(suggested) = self.follow_link(r#type) {
+                            // Means both the inner type and the suggested type are the same.
+                            if &suggested == p {
+                                return;
+                            }
+
                             let suggested_dict = self.dict(&suggested).unwrap();
                             let suggested_dict = suggested_dict.borrow();
 
@@ -865,6 +866,29 @@ impl Knowledge {
                                         .insert(
                                             suggested.name.clone(),
                                             Either::Left(TypePointer::Ref(p.clone())),
+                                        );
+                                }
+                            }
+                        }
+                    } else {
+                        if let TypePointer::Ref(suggested) = self.follow_link(r#type) {
+                            if let Some(suggested_dict) = self.dict(&suggested) {
+                                let suggested_dict = suggested_dict.borrow();
+
+                                // TODO - We might want to revise this code when we are going to
+                                // generate type dictionaries for types like functions or records.
+                                // for example, we might want to support a generic type over a record
+                                // that has a field named 'foo' in it. That test below prevents us from having
+                                // that because we only infer if there is not suggested type constraints in
+                                // the provided generic type.
+                                if suggested_dict.is_generic() && suggested_dict.impls.is_empty() {
+                                    self.dict_tables
+                                        .entry(suggested.scope.id())
+                                        .or_default()
+                                        .symbols
+                                        .insert(
+                                            suggested.name.clone(),
+                                            Either::Left(current.clone()),
                                         );
                                 }
                             }
@@ -893,19 +917,20 @@ impl Knowledge {
     ) {
         match pointer {
             TypePointer::Ref(p) => {
-                let dict = self.dict(p).unwrap();
-                let dict = dict.borrow();
+                if let Some(dict) = self.dict(p) {
+                    let dict = dict.borrow();
 
-                if dict.is_generic() {
-                    let var = self.new_generic_with_constraints(scope, dict.impls.clone());
-                    self.dict_tables
-                        .entry(p.scope.id())
-                        .or_default()
-                        .symbols
-                        .insert(
-                            p.name.clone(),
-                            Either::Left(TypePointer::app(var, r#type.clone())),
-                        );
+                    if dict.is_generic() {
+                        let var = self.new_generic_with_constraints(scope, dict.impls.clone());
+                        self.dict_tables
+                            .entry(p.scope.id())
+                            .or_default()
+                            .symbols
+                            .insert(
+                                p.name.clone(),
+                                Either::Left(TypePointer::app(var, r#type.clone())),
+                            );
+                    }
                 }
             }
 

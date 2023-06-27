@@ -30,8 +30,9 @@ pub fn infer_proc<S: Scope>(
 
             // TODO - Improve the algo so the system infer that `Send` is a constraint for an higher
             // kinded type.
-            know.suggest_constraint(&target.tag.pointer, "Send");
-            know.suggest_inner_type(scope, &target.tag.pointer, &param.tag.pointer);
+            let target_pointer = know.follow_link(&target.tag.pointer);
+            know.suggest_constraint(&target_pointer, "Send");
+            know.suggest_inner_type(scope, &target_pointer, &param.tag.pointer);
 
             Ok(Tag {
                 item: Proc::Output(target, param),
@@ -49,8 +50,9 @@ pub fn infer_proc<S: Scope>(
 
             // TODO - Improve the algo so the system infer that `Receive` is a constraint for an higher
             // kinded type.
-            know.suggest_constraint(&source.tag.pointer, "Receive");
-            know.suggest_inner_type(scope, &source.tag.pointer, &event.tag.pointer);
+            let source_pointer = know.follow_link(&source.tag.pointer);
+            know.suggest_constraint(&source_pointer, "Receive");
+            know.suggest_inner_type(scope, &source_pointer, &event.tag.pointer);
 
             Ok(Tag {
                 item: Proc::Input(source, event),
@@ -370,16 +372,31 @@ pub fn infer_decl<S: Scope>(
         Decl::Def(defs) => {
             let mut new_defs = Vec::new();
             for def in defs {
-                let projected_type =
-                    TypePointer::app(know.client_pointer(), know.new_generic(scope));
+                let abs_pos = def.item.abs.tag;
+                let new_scope = know.new_scope(scope);
+                let pattern = infer_pattern(know, &new_scope, def.item.abs.item.pattern)?;
+                let projected_type = TypePointer::app(
+                    know.client_pointer(),
+                    know.follow_link(&pattern.tag.pointer),
+                );
                 let pointer = know.declare_from_pointer(scope, &def.item.name, projected_type);
-                let abs = infer_abs(know, scope, def.item.abs)?;
-                know.suggest_inner_type(scope, &pointer, &abs.tag.pointer);
+                let pattern_pointer = pattern.tag.pointer.clone();
+                let proc = infer_proc(know, &new_scope, *def.item.abs.item.proc)?;
 
                 new_defs.push(Tag {
                     item: Def {
                         name: def.item.name,
-                        abs,
+                        abs: Tag {
+                            item: Abs {
+                                pattern,
+                                proc: Box::new(proc),
+                            },
+                            tag: TypeInfo {
+                                pos: abs_pos,
+                                scope: new_scope.as_local(),
+                                pointer: pattern_pointer,
+                            },
+                        },
                     },
                     tag: TypeInfo {
                         pos,

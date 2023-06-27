@@ -10,7 +10,7 @@ path = "../pyro-core"
 
 [dependencies.tokio]
 version = "1"
-features = ["sync"]
+features = ["sync", "rt-multi-thread"]
 
 [dependencies]
 eyre = "0.6"

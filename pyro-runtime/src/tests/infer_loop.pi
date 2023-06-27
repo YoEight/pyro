@@ -1,0 +1,5 @@
+run
+    (def go x:Integer =
+        go ! (+ x 1)
+
+     go ! 3)

@@ -1,0 +1,5 @@
+run
+    (def go [sub: ?EventRecord] =
+        sub?record = ( output ! record | go ! [sub] )
+
+    go ! [(subscribe "languages")])
