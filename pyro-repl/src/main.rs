@@ -6,8 +6,8 @@ use pyro_core::ast::Tag;
 use pyro_core::parser::ParserState;
 use pyro_core::sym::Sym;
 use pyro_core::tokenizer::Tokenizer;
-use pyro_core::{infer_decl, infer_val, STDLIB};
-use pyro_runtime::{Engine, EngineBuilder, Env};
+use pyro_core::{infer_decl, infer_val, Machine};
+use pyro_runtime::{Engine, Env};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -39,7 +39,7 @@ async fn main() -> eyre::Result<()> {
         .version("master");
 
     let mut inputs = glyph::file_backed_inputs(options, ".pyro-repl")?;
-    let mut engine = EngineBuilder::default().stdlib(Env::stdio()).build()?;
+    let mut engine = Engine::with_nominal_typing().stdlib(Env::stdio()).build()?;
 
     while let Some(input) = inputs.next_input()? {
         match input {
@@ -115,7 +115,7 @@ fn extrapolate_path(dirs: &UserDirs, path: PathBuf) -> PathBuf {
     buf
 }
 
-fn add_module(engine: &mut Engine, path: PathBuf) -> eyre::Result<()> {
+fn add_module<M: Machine>(engine: &mut Engine<M>, path: PathBuf) -> eyre::Result<()> {
     let source_code = std::fs::read_to_string(path)?;
     let tokens = Tokenizer::new(source_code.as_str()).tokenize()?;
     let mut parser = ParserState::new(tokens.as_slice());
@@ -129,7 +129,7 @@ fn add_module(engine: &mut Engine, path: PathBuf) -> eyre::Result<()> {
             tag: pos,
         };
 
-        let decl = infer_decl(engine.context(), &STDLIB, node)?;
+        let decl = infer_decl(engine.context(), node)?;
         let decl = annotate_decl(engine.context(), decl)?;
 
         engine.runtime().register(decl.item);
@@ -143,17 +143,14 @@ fn add_module(engine: &mut Engine, path: PathBuf) -> eyre::Result<()> {
     Ok(())
 }
 
-fn type_expr(engine: &mut Engine, expr: String) -> eyre::Result<()> {
+fn type_expr<M: Machine>(engine: &mut Engine<M>, expr: String) -> eyre::Result<()> {
     let tokens = Tokenizer::new(expr.as_str()).tokenize()?;
     let mut parser = ParserState::new(tokens.as_slice());
     let value = parser.parse_value()?;
-    let value = infer_val(engine.context(), &STDLIB, value)?;
+    let value = infer_val(engine.context(), value)?;
     let value = annotate_val(engine.context(), value)?;
 
-    println!(
-        ">>> {}",
-        engine.context().project_type(&value.tag.r#type).r#type
-    );
+    println!(">>> {}", engine.context().project_type(&value.tag.r#type));
 
     Ok(())
 }

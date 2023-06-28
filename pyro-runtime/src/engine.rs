@@ -5,7 +5,9 @@ use crate::value::{Channel, PyroType, RuntimeValue};
 use crate::PyroValue;
 use pyro_core::annotate::Ann;
 use pyro_core::ast::{Abs, Pat, Proc, Prop, Record, Tag, Val};
-use pyro_core::{Dict, Knowledge, Type, TypePointer, STDLIB};
+use pyro_core::{
+    Dict, DynamicTyping, Machine, NominalTyping, Type, TypePointer, TypeSystem, STDLIB,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -33,21 +35,21 @@ enum Command {
     },
 }
 
-pub struct EngineBuilder {
+pub struct EngineBuilder<M> {
     commands: Vec<Command>,
     env: Option<Env>,
+    type_system: M,
 }
 
-impl Default for EngineBuilder {
-    fn default() -> Self {
+impl<M: Machine> EngineBuilder<M> {
+    pub fn new(type_system: M) -> Self {
         Self {
             commands: vec![],
             env: None,
+            type_system,
         }
     }
-}
 
-impl EngineBuilder {
     pub fn register_function<F, A, B>(mut self, name: impl AsRef<str>, func: F) -> Self
     where
         F: Fn(A) -> B + Send + Sync + 'static,
@@ -167,9 +169,9 @@ impl EngineBuilder {
             .register_function_2("||", |a, b| a || b)
     }
 
-    pub fn build(self) -> eyre::Result<Engine> {
+    pub fn build(self) -> eyre::Result<Engine<M>> {
         let mut runtime_values = HashMap::<String, RuntimeValue>::new();
-        let mut knowledge = Knowledge::standard();
+        let mut knowledge = TypeSystem::new(self.type_system);
 
         for cmd in self.commands {
             match cmd {
@@ -179,14 +181,14 @@ impl EngineBuilder {
                     match &pointer {
                         TypePointer::Ref(type_ref) if type_ref.name == name => {}
                         _ => {
-                            knowledge.declare_from_pointer(&STDLIB, name, pointer);
+                            knowledge.declare_from_pointer(name, &pointer);
                         }
                     }
                 }
 
                 Command::CreateSymbol { name, r#type, repr } => {
                     let pointer = handle_builder_type_command(&mut knowledge, r#type.0)?;
-                    knowledge.declare_from_pointer(&STDLIB, name.as_str(), pointer);
+                    knowledge.declare_from_pointer(name.as_str(), &pointer);
                     runtime_values.insert(name, repr);
                 }
             }
@@ -202,8 +204,8 @@ impl EngineBuilder {
     }
 }
 
-fn handle_builder_type_command(
-    knowledge: &mut Knowledge,
+fn handle_builder_type_command<M: Machine>(
+    knowledge: &mut TypeSystem<M>,
     cmd: TypeCommand,
 ) -> eyre::Result<TypePointer> {
     match cmd {
@@ -216,7 +218,6 @@ fn handle_builder_type_command(
             match knowledge.look_up(&STDLIB, name.as_str()) {
                 Some(p) => Ok(p),
                 None => Ok(knowledge.declare_from_dict(
-                    &STDLIB,
                     name.as_str(),
                     Dict::with_impls(Type::named(name.as_str()), constraints),
                 )),
@@ -224,14 +225,16 @@ fn handle_builder_type_command(
         }
 
         TypeCommand::CreateForAll { constraints } => {
-            let scope = knowledge.new_scope(&STDLIB);
-            let var = knowledge.new_generic(&scope);
+            let scope = knowledge.push_scope();
+            let var = knowledge.new_generic("'a");
+            // FIXME - Weird sequence of event but I don't see how to create temporary generic type right now.
+            knowledge.pop_scope();
             let mut constraint_pointers = Vec::new();
             let body = if constraints.is_empty() {
                 var.clone()
             } else {
                 for constraint in constraints {
-                    if let Some(constraint) = knowledge.look_up(&STDLIB, &constraint) {
+                    if let Some(constraint) = knowledge.look_up(&scope, &constraint) {
                         constraint_pointers.push(TypePointer::app(constraint, var.clone()));
                         continue;
                     }
@@ -271,14 +274,16 @@ fn handle_builder_type_command(
                 InnerType::Declared(cmd) => handle_builder_type_command(knowledge, *cmd)?,
 
                 InnerType::ForAll { constraints } => {
-                    let scope = knowledge.new_scope(&STDLIB);
-                    let var = knowledge.new_generic(&scope);
+                    let scope = knowledge.push_scope();
+                    let var = knowledge.new_generic("'a");
+                    // FIXME - Weird sequence of event but I don't see how to create temporary generic type right now.
+                    knowledge.pop_scope();
                     let mut constraint_pointers = Vec::new();
                     let body = if constraints.is_empty() {
                         var.clone()
                     } else {
                         for constraint in constraints {
-                            if let Some(constraint) = knowledge.look_up(&STDLIB, &constraint) {
+                            if let Some(constraint) = knowledge.look_up(&scope, &constraint) {
                                 constraint_pointers.push(TypePointer::app(constraint, var.clone()));
                                 continue;
                             }
@@ -315,17 +320,25 @@ fn handle_builder_type_command(
 }
 
 #[derive(Clone)]
-pub struct Engine {
+pub struct Engine<M> {
     runtime: Runtime,
-    knowledge: Knowledge,
+    knowledge: TypeSystem<M>,
 }
 
-impl Engine {
-    pub fn builder() -> EngineBuilder {
-        EngineBuilder::default()
+impl Engine<DynamicTyping> {
+    pub fn with_no_type_system() -> EngineBuilder<DynamicTyping> {
+        EngineBuilder::new(DynamicTyping::default())
     }
+}
 
-    pub fn context(&mut self) -> &mut Knowledge {
+impl Engine<NominalTyping> {
+    pub fn with_nominal_typing() -> EngineBuilder<NominalTyping> {
+        EngineBuilder::new(NominalTyping::default())
+    }
+}
+
+impl<M: Machine> Engine<M> {
+    pub fn context(&mut self) -> &mut TypeSystem<M> {
         &mut self.knowledge
     }
 
@@ -335,7 +348,7 @@ impl Engine {
 
     pub fn compile(&self, source_code: &str) -> eyre::Result<PyroProcess> {
         let mut this = self.clone();
-        let program = pyro_core::parse(&mut this.context(), source_code)?;
+        let program = pyro_core::parse(this.context(), source_code)?;
 
         Ok(PyroProcess {
             runtime: self.runtime.clone(),
