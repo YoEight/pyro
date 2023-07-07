@@ -1,7 +1,6 @@
 use crate::ast::{Abs, Decl, Def, Pat, PatVar, Prop, Record, Var};
 use crate::ast::{Proc, Program, Tag, Val};
-use crate::context::LocalScope;
-use crate::typing::{Knowledge, Type, TypeInfo, TypePointer};
+use crate::typing::{Machine, Type, TypeInfo, TypePointer, TypeSystem};
 use crate::{not_a_function, not_implement, record_label_not_found, type_error, Pos};
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
@@ -14,7 +13,6 @@ pub enum ValCtx {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Ann {
     pub pos: Pos,
-    pub scope: LocalScope,
     pub r#type: TypePointer,
 }
 
@@ -23,13 +21,12 @@ impl Ann {
         Self {
             pos: tag.pos,
             r#type,
-            scope: tag.scope,
         }
     }
 }
 
-pub fn annotate_program(
-    ctx: &mut Knowledge,
+pub fn annotate_program<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     prog: Program<TypeInfo>,
 ) -> eyre::Result<Program<Ann>> {
     let mut annotated = Vec::new();
@@ -41,8 +38,8 @@ pub fn annotate_program(
     Ok(Program { procs: annotated })
 }
 
-fn annotate_proc(
-    ctx: &mut Knowledge,
+fn annotate_proc<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     proc: Tag<Proc<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Proc<Ann>, Ann>> {
     match proc.item {
@@ -51,20 +48,15 @@ fn annotate_proc(
             let r = annotate_val(ctx, r)?;
 
             if !ctx.implements(&l.tag.r#type, "Send") {
-                return not_implement(
-                    proc.tag.pos,
-                    &ctx.project_type(&l.tag.r#type).r#type,
-                    "Send",
-                );
+                return not_implement(proc.tag.pos, &ctx.project_type(&l.tag.r#type), "Send");
             }
 
-            if let TypePointer::App(_, inner) = ctx.follow_link(&l.tag.r#type) {
-                if !ctx.param_matches(inner.as_ref(), &r.tag.r#type) {
-                    let inner = ctx.project_type(inner.as_ref());
+            if let Some((_, inner)) = ctx.as_type_constructor(&l.tag.r#type) {
+                if !ctx.param_matches(&inner, &r.tag.r#type) {
                     return type_error(
                         proc.tag.pos,
-                        &inner.r#type,
-                        &ctx.project_type(&r.tag.r#type).r#type,
+                        &ctx.project_type(&inner),
+                        &ctx.project_type(&r.tag.r#type),
                     );
                 }
             } else {
@@ -72,7 +64,7 @@ fn annotate_proc(
             }
 
             Ok(Tag {
-                tag: Ann::with_type(ctx.process_pointer(), proc.tag),
+                tag: Ann::with_type(TypePointer::process(), proc.tag),
                 item: Proc::Output(l, r),
             })
         }
@@ -82,20 +74,15 @@ fn annotate_proc(
             let r = annotate_abs(ctx, r)?;
 
             if !ctx.implements(&l.tag.r#type, "Receive") {
-                return not_implement(
-                    proc.tag.pos,
-                    &ctx.project_type(&l.tag.r#type).r#type,
-                    "Receive",
-                );
+                return not_implement(proc.tag.pos, &ctx.project_type(&l.tag.r#type), "Receive");
             }
 
-            if let TypePointer::App(_, inner) = ctx.follow_link(&l.tag.r#type) {
-                if !ctx.param_matches(inner.as_ref(), &r.tag.r#type) {
-                    let inner = ctx.project_type(inner.as_ref());
+            if let Some((_, inner)) = ctx.as_type_constructor(&l.tag.r#type) {
+                if !ctx.param_matches(&inner, &r.tag.r#type) {
                     return type_error(
                         proc.tag.pos,
-                        &inner.r#type,
-                        &ctx.project_type(&r.tag.r#type).r#type,
+                        &ctx.project_type(&inner),
+                        &ctx.project_type(&r.tag.r#type),
                     );
                 }
             } else {
@@ -103,18 +90,18 @@ fn annotate_proc(
             }
 
             Ok(Tag {
-                tag: Ann::with_type(ctx.process_pointer(), proc.tag),
+                tag: Ann::with_type(TypePointer::process(), proc.tag),
                 item: Proc::Input(l, r),
             })
         }
 
         Proc::Null => Ok(Tag {
             item: Proc::Null,
-            tag: Ann::with_type(ctx.process_pointer(), proc.tag),
+            tag: Ann::with_type(TypePointer::process(), proc.tag),
         }),
 
         Proc::Parallel(ps) => {
-            let ann = Ann::with_type(ctx.process_pointer(), proc.tag);
+            let ann = Ann::with_type(TypePointer::process(), proc.tag);
             let mut new_ps = Vec::new();
 
             for p in ps {
@@ -135,22 +122,22 @@ fn annotate_proc(
 
             Ok(Tag {
                 item: Proc::Decl(d, Box::new(p)),
-                tag: Ann::with_type(ctx.process_pointer(), proc.tag),
+                tag: Ann::with_type(TypePointer::process(), proc.tag),
             })
         }
 
         Proc::Cond(val, if_proc, else_proc) => {
             let val = annotate_val(ctx, val)?;
 
-            if !ctx.param_matches(&ctx.bool_pointer(), &val.tag.r#type) {
+            if !ctx.param_matches(&TypePointer::bool(), &val.tag.r#type) {
                 return type_error(
                     val.tag.pos,
                     &Type::bool(),
-                    &ctx.project_type(&val.tag.r#type).r#type,
+                    &ctx.project_type(&val.tag.r#type),
                 );
             }
 
-            let ann = Ann::with_type(ctx.process_pointer(), proc.tag);
+            let ann = Ann::with_type(TypePointer::process(), proc.tag);
             let if_proc = annotate_proc(ctx, *if_proc)?;
             let else_proc = annotate_proc(ctx, *else_proc)?;
 
@@ -162,8 +149,8 @@ fn annotate_proc(
     }
 }
 
-fn annotate_abs(
-    ctx: &mut Knowledge,
+fn annotate_abs<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     tag: Tag<Abs<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Abs<Ann>, Ann>> {
     let pattern = annotate_pattern(ctx, tag.item.pattern)?;
@@ -179,11 +166,11 @@ fn annotate_abs(
     })
 }
 
-pub fn annotate_decl(
-    ctx: &mut Knowledge,
+pub fn annotate_decl<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     decl: Tag<Decl<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Decl<Ann>, Ann>> {
-    let ann = Ann::with_type(ctx.process_pointer(), decl.tag.clone());
+    let ann = Ann::with_type(TypePointer::process(), decl.tag.clone());
     let item = match decl.item {
         Decl::Channels(cs) => {
             let mut chans = Vec::new();
@@ -220,8 +207,8 @@ pub fn annotate_decl(
     Ok(Tag { item, tag: ann })
 }
 
-fn annotate_pattern(
-    ctx: &mut Knowledge,
+fn annotate_pattern<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     tag: Tag<Pat<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Pat<Ann>, Ann>> {
     match tag.item {
@@ -237,8 +224,8 @@ fn annotate_pattern(
                 if !ctx.param_matches(&pat_tag_pointer, &pat.tag.pointer) {
                     return type_error(
                         tag.tag.pos,
-                        &ctx.project_type(&pat_tag.tag.r#type).r#type,
-                        &ctx.project_type(&pat_dict.as_ref().tag.r#type).r#type,
+                        &ctx.project_type(&pat_tag.tag.r#type),
+                        &ctx.project_type(&pat_dict.as_ref().tag.r#type),
                     );
                 }
 
@@ -285,8 +272,8 @@ fn annotate_pattern(
         }),
     }
 }
-fn annotate_pat_var(
-    ctx: &mut Knowledge,
+fn annotate_pat_var<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     pat_var: PatVar<TypeInfo>,
 ) -> eyre::Result<Tag<PatVar<Ann>, Ann>> {
     let pattern = if let Some(param) = pat_var.pattern {
@@ -308,8 +295,8 @@ fn annotate_pat_var(
     })
 }
 
-pub fn annotate_val(
-    ctx: &mut Knowledge,
+pub fn annotate_val<M: Machine>(
+    ctx: &mut TypeSystem<M>,
     lit: Tag<Val<TypeInfo>, TypeInfo>,
 ) -> eyre::Result<Tag<Val<Ann>, Ann>> {
     match lit.item {
@@ -322,7 +309,6 @@ pub fn annotate_val(
             let mut path = p.clone();
             path.reverse();
             let name = path.pop().unwrap();
-            ctx.register_used_variable(&lit.tag.scope, &name);
             let dict = if let TypePointer::Rec(mut rec) = lit.tag.pointer.clone() {
                 let mut temp = None;
 
@@ -385,7 +371,7 @@ pub fn annotate_val(
 
         Val::AnoClient(abs) => {
             let abs = annotate_abs(ctx, abs)?;
-            let r#type = abs.tag.r#type.clone();
+            let r#type = TypePointer::app(TypePointer::client(), abs.tag.r#type.clone());
 
             Ok(Tag {
                 item: Val::AnoClient(abs),
@@ -397,21 +383,18 @@ pub fn annotate_val(
             let caller = annotate_val(ctx, *caller)?;
             let param = annotate_val(ctx, *param)?;
 
-            let result_type = if let TypePointer::Fun(expect, result) =
-                ctx.follow_link(&caller.tag.r#type)
-            {
-                if !ctx.param_matches(expect.as_ref(), &param.tag.r#type) {
-                    let expectation = ctx.project_type(expect.as_ref());
+            let result_type = if let Some((expect, result)) = ctx.as_function(&caller.tag.r#type) {
+                if !ctx.param_matches(expect, &param.tag.r#type) {
                     return type_error(
                         lit.tag.pos,
-                        &expectation.r#type,
-                        &ctx.project_type(&param.tag.r#type).r#type,
+                        &ctx.project_type(expect),
+                        &ctx.project_type(&param.tag.r#type),
                     );
                 }
 
-                result.as_ref().clone()
+                result.clone()
             } else {
-                return not_a_function(lit.tag.pos, &ctx.project_type(&caller.tag.r#type).r#type);
+                return not_a_function(lit.tag.pos, &ctx.project_type(&caller.tag.r#type));
             };
 
             let ann = Ann::with_type(result_type, lit.tag);

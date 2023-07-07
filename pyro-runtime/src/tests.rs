@@ -53,7 +53,7 @@ impl PyroType for Sub {
 fn test_geth_should_infer() {
     let source_code = include_str!("tests/infer_process.pi");
 
-    let engine = Engine::builder()
+    let engine = Engine::with_nominal_typing()
         .register_type::<EventEntry>("Entry")
         .register_type::<EventRecord>("EventRecord")
         .register_type::<ProgramOutput>("output")
@@ -76,7 +76,7 @@ impl PyroType for Loop {
 fn test_geth_should_infer_loop() {
     let source_code = include_str!("tests/infer_loop.pi");
 
-    let engine = Engine::builder()
+    let engine = Engine::with_nominal_typing()
         .register_function_2("+", |x: i64, y: i64| x + y)
         .build()
         .unwrap();

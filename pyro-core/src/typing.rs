@@ -1,12 +1,15 @@
+mod dynamic;
+pub(crate) mod nominal;
+#[cfg(test)]
+mod tests;
+
 use crate::ast::{Prop, Record};
 use crate::context::{LocalScope, Scope};
 use crate::sym::{Literal, TypeSym};
-use crate::utils::generate_generic_type_name;
+pub use crate::typing::dynamic::DynamicTyping;
 use crate::{Pos, STDLIB};
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
-use std::rc::Rc;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypePointer {
@@ -26,6 +29,15 @@ impl TypePointer {
 
         panic!("Provided type pointer is not reference")
     }
+
+    pub fn is_type_ref(&self) -> bool {
+        if let TypePointer::Ref(_) = self {
+            return true;
+        }
+
+        false
+    }
+
     pub fn app(a: TypePointer, b: TypePointer) -> Self {
         TypePointer::App(Box::new(a), Box::new(b))
     }
@@ -37,12 +49,60 @@ impl TypePointer {
     pub fn rec(props: Vec<Prop<TypePointer>>) -> Self {
         TypePointer::Rec(Record { props })
     }
+
+    pub fn process() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Process".to_string(),
+        })
+    }
+
+    pub fn bool() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Bool".to_string(),
+        })
+    }
+
+    pub fn integer() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Integer".to_string(),
+        })
+    }
+
+    pub fn char() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Char".to_string(),
+        })
+    }
+
+    pub fn client() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Client".to_string(),
+        })
+    }
+
+    pub fn string() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "String".to_string(),
+        })
+    }
+
+    pub fn show() -> TypePointer {
+        TypePointer::Ref(TypeRef {
+            scope: STDLIB.as_local_scope(),
+            name: "Show".to_string(),
+        })
+    }
 }
 
 #[derive(Clone)]
 pub struct TypeInfo {
     pub pos: Pos,
-    pub scope: LocalScope,
     pub pointer: TypePointer,
 }
 
@@ -228,8 +288,16 @@ impl Type {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TypeStatus {
+    NeedInference,
+    Generic,
+    Defined,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Dict {
     pub impls: HashSet<String>,
+    pub status: TypeStatus,
     pub r#type: Type,
 }
 
@@ -248,7 +316,11 @@ impl Dict {
             impls.insert(r#type);
         }
 
-        Self { r#type, impls }
+        Self {
+            r#type,
+            impls,
+            status: TypeStatus::Defined,
+        }
     }
 
     pub fn implements(&self, r#type: &str) -> bool {
@@ -283,21 +355,6 @@ pub struct TypeRef {
     pub name: String,
 }
 
-type DictRef = Rc<RefCell<Dict>>;
-
-#[derive(Clone, Default)]
-struct ScopedTypes {
-    name_gen: usize,
-    symbols: HashMap<String, Either<TypePointer, DictRef>>,
-    used: HashSet<String>,
-}
-
-#[derive(Clone)]
-pub enum Either<A, B> {
-    Left(A),
-    Right(B),
-}
-
 #[derive(Default, Clone)]
 pub struct UsedVariables {
     inner: HashMap<u32, HashSet<String>>,
@@ -317,264 +374,182 @@ impl UsedVariables {
     }
 }
 
-#[derive(Clone)]
-pub struct Knowledge {
-    scope_gen: u32,
-    dict_tables: HashMap<u32, ScopedTypes>,
-    pub(crate) default_rec_dict: Dict,
-    pub(crate) default_fun_dict: Dict,
-    pub(crate) default_dict: Dict,
+fn is_generic_name(name: &str) -> bool {
+    name.chars().nth(0).unwrap() == '\''
 }
 
-impl Knowledge {
-    pub fn standard() -> Self {
-        let mut this = Knowledge {
-            scope_gen: 0,
-            dict_tables: Default::default(),
-            default_rec_dict: Dict::new(Type::Rec {
-                props: Record::default(),
-            }),
+#[derive(Clone)]
+pub enum TypeCreated {
+    Defined {
+        name: String,
+        constraints: Vec<String>,
+        generic: bool,
+    },
 
-            default_fun_dict: Dict::new(Type::Rec {
-                props: Record::default(),
-            }),
-            default_dict: Dict::new(Type::named("@@@@@@@")),
-        };
+    Inferred,
+}
 
-        this.declare_from_dict(&STDLIB, "Show", Dict::new(Type::named("Show")));
-        this.declare_from_dict(&STDLIB, "Process", Dict::new(Type::named("Process")));
+#[derive(Clone)]
+pub enum Event {
+    PushScope,
+    PopScope,
+    SetScope(LocalScope),
 
-        this.declare_from_dict(
-            &STDLIB,
-            "Bool",
-            Dict::with_impls(Type::named("Bool"), vec!["Show".to_string()]),
-        );
+    VariableIntroduced {
+        type_ref: TypeRef,
+        location: TypePointer,
+    },
 
-        this.declare_from_dict(
-            &STDLIB,
-            "Integer",
-            Dict::with_impls(Type::named("Integer"), vec!["Show".to_string()]),
-        );
+    TypeCreated(TypeCreated),
 
-        this.declare_from_dict(
-            &STDLIB,
-            "String",
-            Dict::with_impls(Type::named("String"), vec!["Show".to_string()]),
-        );
+    TypeConstraintSuggested {
+        type_ref: TypeRef,
+        constraint: String,
+    },
 
-        this.declare_from_dict(
-            &STDLIB,
-            "Char",
-            Dict::with_impls(Type::named("Char"), vec!["Show".to_string()]),
-        );
+    TypeSuggested {
+        target: TypeRef,
+        suggested: TypePointer,
+    },
+}
 
-        this.declare_from_dict(
-            &STDLIB,
-            "Client",
-            Dict::with_impls(Type::named("Client"), vec!["Send".to_string()]),
-        );
+pub trait Machine: Clone {
+    type Model: Types;
 
-        this.declare_from_dict(
-            &STDLIB,
-            "Server",
-            Dict::with_impls(Type::named("Server"), vec!["Receive".to_string()]),
-        );
+    fn apply(&mut self, event: Event);
+    fn model(&self) -> &Self::Model;
+}
 
-        this.declare_from_dict(
-            &STDLIB,
-            "Channel",
-            Dict::with_impls(
-                Type::named("Send"),
-                vec!["Send".to_string(), "Receive".to_string()],
-            ),
-        );
+pub trait Types {
+    fn project(&self, target: &TypePointer) -> Type;
+    fn type_check(&self, expect: &TypePointer, provided: &TypePointer) -> bool;
+    fn look_up<S: Scope>(&self, scope: &S, name: &str) -> Option<TypePointer>;
 
-        this
+    fn current_scope(&self) -> LocalScope;
+
+    /// What a terrible name to describe a function that returns a random name based on the current
+    /// type machine state. If the internal state hasn't changed, this function will return the same
+    /// value.
+    fn current_available_name(&self) -> TypeRef;
+
+    fn as_function<'a>(
+        &'a self,
+        r#type: &'a TypePointer,
+    ) -> Option<(&'a TypePointer, &'a TypePointer)>;
+
+    fn as_type_constructor<'a>(
+        &'a self,
+        r#type: &'a TypePointer,
+    ) -> Option<(&'a TypePointer, &'a TypePointer)>;
+
+    fn type_implements(&self, r#type: &TypePointer, constraint: &str) -> bool;
+}
+
+#[derive(Clone)]
+pub struct TypeSystem<A> {
+    machine: A,
+}
+
+impl<M> TypeSystem<M> {
+    pub fn new(machine: M) -> TypeSystem<M> {
+        Self { machine }
+    }
+}
+
+impl<M: Machine> TypeSystem<M> {
+    pub fn implements(&self, target: &TypePointer, constraint: &str) -> bool {
+        self.machine.model().type_implements(target, constraint)
     }
 
-    pub fn show_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Show").unwrap()
+    pub fn project_type(&self, target: &TypePointer) -> Type {
+        self.machine.model().project(target)
     }
 
-    pub fn process_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Process").unwrap()
+    pub fn param_matches(&self, expect: &TypePointer, provided: &TypePointer) -> bool {
+        self.machine.model().type_check(expect, provided)
     }
 
-    pub fn client_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Client").unwrap()
+    pub fn suggest_constraint(&mut self, target: &TypePointer, constraint: &str) {
+        if let TypePointer::Ref(target) = target {
+            self.machine.apply(Event::TypeConstraintSuggested {
+                type_ref: target.clone(),
+                constraint: constraint.to_string(),
+            })
+        }
     }
 
-    pub fn channel_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Channel").unwrap()
+    pub fn suggest_type(&mut self, target: &TypePointer, provided: &TypePointer) {
+        if let TypePointer::Ref(target) = target {
+            self.machine.apply(Event::TypeSuggested {
+                target: target.clone(),
+                suggested: provided.clone(),
+            })
+        }
     }
 
-    pub fn integer_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Integer").unwrap()
+    pub fn suggest_inner_type(&mut self, target: &TypePointer, provided: &TypePointer) {
+        if let Some((_, target)) = self.as_type_constructor(target) {
+            self.suggest_type(&target, provided);
+        }
     }
 
-    pub fn string_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "String").unwrap()
+    pub fn push_scope(&mut self) -> LocalScope {
+        self.machine.apply(Event::PushScope);
+        self.machine.model().current_scope()
     }
 
-    pub fn bool_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Bool").unwrap()
+    pub fn pop_scope(&mut self) {
+        self.machine.apply(Event::PopScope);
     }
 
-    pub fn char_pointer(&self) -> TypePointer {
-        self.look_up(&STDLIB, "Char").unwrap()
+    pub fn set_scope<S: Scope>(&mut self, scope: &S) {
+        self.machine.apply(Event::SetScope(scope.as_local()));
     }
 
-    pub fn declare<S: Scope>(
+    pub fn current_scope(&self) -> LocalScope {
+        self.machine.model().current_scope()
+    }
+
+    pub fn look_up<S: Scope>(&self, scope: &S, name: impl AsRef<str>) -> Option<TypePointer> {
+        self.machine.model().look_up(scope, name.as_ref())
+    }
+
+    pub fn declare_from_pointer(
         &mut self,
-        scope: &S,
         name: impl AsRef<str>,
-        target: Either<TypePointer, DictRef>,
+        location: &TypePointer,
     ) -> TypePointer {
+        let scope = self.machine.model().current_scope();
         let type_ref = TypeRef {
-            scope: scope.as_local(),
+            scope,
             name: name.as_ref().to_string(),
         };
 
-        let types = self.dict_tables.entry(scope.id()).or_default();
-        types.symbols.insert(name.as_ref().to_string(), target);
+        self.machine.apply(Event::VariableIntroduced {
+            type_ref: type_ref.clone(),
+            location: location.clone(),
+        });
 
         TypePointer::Ref(type_ref)
     }
 
-    pub fn declare_from_ref<S: Scope>(
-        &mut self,
-        scope: &S,
-        name: impl AsRef<str>,
-        other: TypeRef,
-    ) -> TypePointer {
-        self.declare(scope, name, Either::Left(TypePointer::Ref(other)))
-    }
-
-    pub fn declare_from_pointer<S: Scope>(
-        &mut self,
-        scope: &S,
-        name: impl AsRef<str>,
-        other: TypePointer,
-    ) -> TypePointer {
-        self.declare(scope, name, Either::Left(other))
-    }
-
-    pub fn declare_from_dict<S: Scope>(
-        &mut self,
-        scope: &S,
-        name: impl AsRef<str>,
-        other: Dict,
-    ) -> TypePointer {
-        self.declare(scope, name, Either::Right(Rc::new(RefCell::new(other))))
-    }
-
-    pub fn follow_link(&self, pointer: &TypePointer) -> TypePointer {
-        let mut current = pointer;
-
-        loop {
-            let type_ref = match current {
-                TypePointer::Ref(r) => r,
-                _ => return current.clone(),
-            };
-
-            let types = self.dict_tables.get(&type_ref.scope.id()).unwrap();
-            match types.symbols.get(&type_ref.name).unwrap() {
-                Either::Left(next) => {
-                    current = if let TypePointer::Ref(_) = next {
-                        next
-                    } else {
-                        return next.clone();
-                    };
-                }
-
-                Either::Right(_) => return TypePointer::Ref(type_ref.clone()),
-            }
-        }
-    }
-
-    pub fn implements(&self, id: &TypePointer, constraint: &str) -> bool {
-        let mut current = id.clone();
-        loop {
-            match self.follow_link(&current) {
-                TypePointer::Ref(type_ref) => {
-                    let dict = self.dict(&type_ref).unwrap();
-                    return dict.borrow().implements(constraint);
-                }
-
-                TypePointer::Rec(_) => return self.default_rec_dict.implements(constraint),
-                TypePointer::Fun(_, _) => return self.default_fun_dict.implements(constraint),
-                TypePointer::App(constr, _) => current = constr.as_ref().clone(),
-                _ => return false,
-            }
-        }
-    }
-
-    pub fn dict(&self, id: &TypeRef) -> Option<DictRef> {
-        let mut current = id;
-
-        loop {
-            let types = self.dict_tables.get(&current.scope.id()).unwrap();
-            match types.symbols.get(&current.name).unwrap() {
-                Either::Left(next) => {
-                    current = match next {
-                        TypePointer::Ref(next) => next,
-                        _ => return None,
-                    };
-                }
-
-                Either::Right(dict) => return Some(dict.clone()),
-            }
-        }
-    }
-
-    pub fn look_up<S: Scope>(&self, scope: &S, name: &str) -> Option<TypePointer> {
-        for (height, scope_id) in scope.ancestors().iter().rev().enumerate() {
-            if let Some(types) = self.dict_tables.get(&scope_id) {
-                if types.symbols.contains_key(name) {
-                    let mut ancestors = scope.ancestors().to_vec();
-
-                    for _ in 0..height {
-                        ancestors.pop();
-                    }
-
-                    return Some(TypePointer::Ref(TypeRef {
-                        scope: LocalScope { ancestors },
-                        name: name.to_string(),
-                    }));
-                }
-            }
-        }
-
-        None
-    }
-
-    pub fn unsafe_new_generic(&mut self, scope: &LocalScope, name: &str) {
-        self.declare_from_dict(scope, &name, Dict::new(Type::named(name.clone())));
-    }
-
-    pub fn new_generic<S: Scope>(&mut self, scope: &S) -> TypePointer {
-        self.new_generic_with_constraints(scope, vec![])
-    }
-
-    pub fn new_generic_with_constraints<S: Scope, I>(&mut self, scope: &S, impls: I) -> TypePointer
-    where
-        I: IntoIterator<Item = String>,
-    {
-        let types = self.dict_tables.entry(scope.id()).or_default();
-        let id = types.name_gen;
-        let name = format!("'{}", generate_generic_type_name(id));
-        types.name_gen += 1;
-
-        // types.insert(&name, Dict::new(Type::named(name.clone())));
-
-        self.declare_from_dict(
+    pub fn declare_from_dict(&mut self, name: impl AsRef<str>, dict: Dict) -> TypePointer {
+        let scope = self.machine.model().current_scope();
+        let type_ref = TypeRef {
             scope,
-            &name,
-            Dict::with_impls(Type::named(name.clone()), impls),
-        )
+            name: name.as_ref().to_string(),
+        };
+
+        self.machine.apply(Event::TypeCreated(TypeCreated::Defined {
+            name: name.as_ref().to_string(),
+            constraints: dict.impls.into_iter().collect(),
+            generic: false,
+        }));
+
+        TypePointer::Ref(type_ref)
     }
 
-    pub fn project_type_pointer<S: Scope>(
+    pub fn look_up_type_or_fail<S: Scope>(
         &mut self,
         scope: &S,
         sym: &TypeSym,
@@ -589,8 +564,8 @@ impl Knowledge {
             }
 
             TypeSym::App(c, i) => {
-                let c = self.project_type_pointer(scope, c.as_ref())?;
-                let i = self.project_type_pointer(scope, i.as_ref())?;
+                let c = self.look_up_type_or_fail(scope, c.as_ref())?;
+                let i = self.look_up_type_or_fail(scope, i.as_ref())?;
 
                 Ok(TypePointer::App(Box::new(c), Box::new(i)))
             }
@@ -600,447 +575,53 @@ impl Knowledge {
                 for prop in &rec.props {
                     props.push(Prop {
                         label: prop.label.clone(),
-                        val: self.project_type_pointer(scope, &prop.val)?,
+                        val: self.look_up_type_or_fail(scope, &prop.val)?,
                     });
                 }
 
                 Ok(TypePointer::Rec(Record { props }))
             }
 
-            TypeSym::Unknown => Ok(self.new_generic(scope)),
+            TypeSym::Unknown => Ok(self.declare_inferred_type()),
         }
     }
 
-    pub fn project_type(&self, id: &TypePointer) -> Dict {
-        match self.follow_link(id) {
-            TypePointer::Ref(r) => self.dict(&r).unwrap().borrow().clone(),
+    pub fn new_generic(&mut self, name: impl AsRef<str>) -> TypePointer {
+        self.machine.apply(Event::TypeCreated(TypeCreated::Defined {
+            name: name.as_ref().to_string(),
+            constraints: vec![],
+            generic: true,
+        }));
 
-            TypePointer::Rec(rec) => {
-                let mut props = Vec::new();
-
-                for prop in &rec.props {
-                    props.push(Prop {
-                        label: prop.label.clone(),
-                        val: self.project_type(&prop.val).r#type,
-                    });
-                }
-
-                let mut dict = self.default_rec_dict.clone();
-                dict.r#type = Type::Rec {
-                    props: Record { props },
-                };
-
-                dict
-            }
-
-            TypePointer::Fun(lhs, rhs) => {
-                let lhs = self.project_type(lhs.as_ref());
-                let rhs = self.project_type(rhs.as_ref());
-                let mut dict = self.default_fun_dict.clone();
-
-                dict.r#type = Type::Fun {
-                    lhs: Box::new(lhs.r#type),
-                    rhs: Box::new(rhs.r#type),
-                };
-
-                dict
-            }
-
-            TypePointer::App(lhs, rhs) => {
-                let mut lhs = self.project_type(lhs.as_ref());
-                let rhs = self.project_type(rhs.as_ref());
-
-                lhs.r#type = Type::App {
-                    lhs: Box::new(lhs.r#type.clone()),
-                    rhs: Box::new(rhs.r#type),
-                };
-
-                lhs
-            }
-
-            TypePointer::ForAll(explicit, _, binders, body) => {
-                let r#type = Type::ForAll {
-                    explicit,
-                    binders,
-                    body: Box::new(self.project_type(body.as_ref()).r#type),
-                };
-
-                let mut dict = self.default_dict.clone();
-                dict.r#type = r#type;
-                dict
-            }
-
-            TypePointer::Qual(ctx, body) => {
-                let ctx = ctx
-                    .iter()
-                    .map(|t| self.project_type(t).r#type)
-                    .collect::<Vec<_>>();
-
-                let r#type = Type::Qual {
-                    ctx,
-                    body: Box::new(self.project_type(body.as_ref()).r#type),
-                };
-
-                let mut dict = self.default_dict.clone();
-                dict.r#type = r#type;
-                dict
-            }
-        }
+        TypePointer::Ref(TypeRef {
+            scope: self.machine.model().current_scope(),
+            name: name.as_ref().to_string(),
+        })
     }
 
-    pub fn new_scope<S: Scope>(&mut self, parent: &S) -> LocalScope {
-        self.scope_gen += 1;
-        let id = self.scope_gen;
-        let mut ancestors = parent.ancestors().to_vec();
+    pub fn declare_inferred_type(&mut self) -> TypePointer {
+        let type_ref = self.machine.model().current_available_name();
 
-        ancestors.push(id);
+        self.machine
+            .apply(Event::TypeCreated(TypeCreated::Inferred));
 
-        LocalScope { ancestors }
+        TypePointer::Ref(type_ref)
     }
 
-    pub fn param_matches(&mut self, require: &TypePointer, provided: &TypePointer) -> bool {
-        match require {
-            TypePointer::Ref(type_ref) => {
-                let require_dict = self.project_type(require);
-                let provided_dict = self.project_type(provided);
-
-                if require_dict.is_generic() {
-                    if provided_dict.is_generic() {
-                        let require_ref = self.dict(type_ref).unwrap();
-                        let mut require_ref = require_ref.borrow_mut();
-                        let provided_ref = self.dict(provided.as_type_ref()).unwrap();
-                        let mut provided_ref = provided_ref.borrow_mut();
-
-                        require_ref.impls.extend(provided_ref.impls.clone());
-                        provided_ref.impls.extend(require_ref.impls.clone());
-
-                        true
-                    } else {
-                        if require_dict.impls.is_subset(&provided_dict.impls) {
-                            self.declare_from_pointer(
-                                &type_ref.scope,
-                                &type_ref.name,
-                                provided.clone(),
-                            );
-
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                } else {
-                    require_dict.r#type == provided_dict.r#type
-                }
-            }
-
-            TypePointer::ForAll(_, scope, binders, body) => {
-                for binder in binders {
-                    self.unsafe_new_generic(scope, binder.as_str());
-                }
-
-                self.param_matches(body.as_ref(), provided)
-            }
-
-            TypePointer::Qual(ctx, body) => {
-                for constraint in ctx {
-                    if let TypePointer::App(lhs, rhs) = constraint {
-                        let project_lhs = self.project_type(lhs.as_ref());
-                        // TODO - If we want Haskell-like higher kinded types, we need to make that
-                        // part more flexible. Right now we don't support universally quantified higher
-                        // kinded types.
-                        if let Type::Var { name } = &project_lhs.r#type {
-                            self.suggest_constraint(rhs.as_ref(), name);
-                        }
-                    }
-                }
-
-                self.param_matches(body.as_ref(), provided)
-            }
-
-            TypePointer::Fun(require_lhs, require_rhs) => {
-                if let TypePointer::Fun(provided_lhs, provided_rhs) = self.follow_link(&provided) {
-                    return self.param_matches(require_lhs.as_ref(), provided_lhs.as_ref())
-                        && self.param_matches(require_rhs.as_ref(), provided_rhs.as_ref());
-                }
-
-                false
-            }
-
-            TypePointer::App(require_lhs, require_rhs) => {
-                if let TypePointer::App(provided_lhs, provided_rhs) = self.follow_link(&provided) {
-                    return self.param_matches(require_lhs.as_ref(), provided_lhs.as_ref())
-                        && self.param_matches(require_rhs.as_ref(), provided_rhs.as_ref());
-                }
-
-                false
-            }
-
-            TypePointer::Rec(require_rec) => {
-                if let TypePointer::Rec(provided_rec) = self.follow_link(&provided) {
-                    if require_rec.props.len() != provided_rec.props.len() {
-                        return false;
-                    }
-
-                    for (require_prop, provided_prop) in
-                        require_rec.props.iter().zip(provided_rec.props.iter())
-                    {
-                        if require_prop.label != provided_prop.label {
-                            return false;
-                        }
-
-                        if !self.param_matches(&require_prop.val, &provided_prop.val) {
-                            return false;
-                        }
-                    }
-
-                    return true;
-                }
-
-                false
-            }
-        }
+    pub fn as_function<'a>(
+        &'a self,
+        r#type: &'a TypePointer,
+    ) -> Option<(&'a TypePointer, &'a TypePointer)> {
+        self.machine.model().as_function(r#type)
     }
 
-    pub fn suggest_constraint(&mut self, pointer: &TypePointer, constraint: &str) {
-        let mut current = pointer;
-
-        loop {
-            match current {
-                TypePointer::Ref(p) => {
-                    if let Some(dict) = self.dict(&p) {
-                        let mut dict = dict.borrow_mut();
-                        if dict.is_generic() && !dict.implements(constraint) {
-                            dict.add(constraint);
-                        }
-                    }
-
-                    break;
-                }
-
-                TypePointer::App(constr, _) => {
-                    current = constr.as_ref();
-                }
-
-                _ => {
-                    break;
-                }
-            }
-        }
-    }
-
-    pub fn suggest_type(&mut self, pointer: &TypePointer, r#type: &TypePointer) {
-        let mut current = pointer;
-
-        loop {
-            match current {
-                TypePointer::Ref(p) => {
-                    if let Some(dict) = self.dict(p) {
-                        let mut dict = dict.borrow_mut();
-                        if dict.is_generic() {
-                            let suggested_dict = self.simplify_dict(r#type);
-
-                            if suggested_dict.is_generic() {
-                                dict.impls.extend(suggested_dict.impls);
-                            } else {
-                                self.dict_tables
-                                    .entry(p.scope.id())
-                                    .or_default()
-                                    .symbols
-                                    .insert(p.name.clone(), Either::Left(r#type.clone()));
-                            }
-                        } else if let TypePointer::Ref(suggested) = self.follow_link(r#type) {
-                            // Means both the inner type and the suggested type are the same.
-                            if &suggested == p {
-                                return;
-                            }
-
-                            let suggested_dict = self.dict(&suggested).unwrap();
-                            let suggested_dict = suggested_dict.borrow();
-
-                            if suggested_dict.is_generic() {
-                                if suggested_dict.impls.is_subset(&dict.impls) {
-                                    self.dict_tables
-                                        .entry(suggested.scope.id())
-                                        .or_default()
-                                        .symbols
-                                        .insert(
-                                            suggested.name.clone(),
-                                            Either::Left(TypePointer::Ref(p.clone())),
-                                        );
-                                }
-                            }
-                        }
-                    } else {
-                        if let TypePointer::Ref(suggested) = self.follow_link(r#type) {
-                            if let Some(suggested_dict) = self.dict(&suggested) {
-                                let suggested_dict = suggested_dict.borrow();
-
-                                // TODO - We might want to revise this code when we are going to
-                                // generate type dictionaries for types like functions or records.
-                                // for example, we might want to support a generic type over a record
-                                // that has a field named 'foo' in it. That test below prevents us from having
-                                // that because we only infer if there is not suggested type constraints in
-                                // the provided generic type.
-                                if suggested_dict.is_generic() && suggested_dict.impls.is_empty() {
-                                    self.dict_tables
-                                        .entry(suggested.scope.id())
-                                        .or_default()
-                                        .symbols
-                                        .insert(
-                                            suggested.name.clone(),
-                                            Either::Left(current.clone()),
-                                        );
-                                }
-                            }
-                        }
-                    }
-
-                    break;
-                }
-
-                TypePointer::App(constr, _) => {
-                    current = constr.as_ref();
-                }
-
-                _ => {
-                    break;
-                }
-            }
-        }
-    }
-
-    pub fn suggest_inner_type<S: Scope>(
-        &mut self,
-        scope: &S,
-        pointer: &TypePointer,
+    pub fn as_type_constructor<'a>(
+        &self,
         r#type: &TypePointer,
-    ) {
-        match pointer {
-            TypePointer::Ref(p) => {
-                if let Some(dict) = self.dict(p) {
-                    let dict = dict.borrow();
-
-                    if dict.is_generic() {
-                        let var = self.new_generic_with_constraints(scope, dict.impls.clone());
-                        self.dict_tables
-                            .entry(p.scope.id())
-                            .or_default()
-                            .symbols
-                            .insert(
-                                p.name.clone(),
-                                Either::Left(TypePointer::app(var, r#type.clone())),
-                            );
-                    }
-                }
-            }
-
-            TypePointer::App(_, inner) => {
-                return self.suggest_type(inner.as_ref(), r#type);
-            }
-
-            _ => {}
-        }
+    ) -> Option<(TypePointer, TypePointer)> {
+        self.machine
+            .model()
+            .as_type_constructor(r#type)
+            .map(|(a, b)| (a.clone(), b.clone()))
     }
-
-    fn simplify_dict(&self, r#type: &TypePointer) -> Dict {
-        match r#type {
-            TypePointer::Fun(_, rhs) => self.project_type(rhs),
-            _ => self.project_type(r#type),
-        }
-    }
-
-    pub fn register_used_variable<S: Scope>(&mut self, scope: &S, name: &str) {
-        let types = self.dict_tables.entry(scope.id()).or_default();
-
-        types.used.insert(name.to_string());
-    }
-
-    pub fn build_used_variables_table(&self) -> UsedVariables {
-        let mut table = UsedVariables::default();
-
-        for (scope, types) in self.dict_tables.iter() {
-            table.inner.insert(*scope, types.used.clone());
-        }
-
-        table
-    }
-}
-
-fn is_generic_name(name: &str) -> bool {
-    name.chars().nth(0).unwrap() == '\''
-}
-
-#[cfg(test)]
-fn type_check_send(know: &mut Knowledge, require: &TypePointer, provided: &TypePointer) -> bool {
-    let dict = know.project_type(require);
-    if !dict.implements("Send") {
-        return false;
-    }
-
-    if let TypePointer::App(_, inner) = &require {
-        know.param_matches(inner.as_ref(), provided)
-    } else {
-        false
-    }
-}
-
-#[test]
-fn test_type_check_client_easy() {
-    let mut know = Knowledge::standard();
-    let client = know.client_pointer();
-    let integer = know.integer_pointer();
-
-    assert!(type_check_send(
-        &mut know,
-        &TypePointer::app(client, integer.clone()),
-        &integer
-    ));
-}
-
-#[test]
-fn test_type_check_generic() {
-    let mut know = Knowledge::standard();
-    let scope = know.new_scope(&STDLIB);
-    let var = know.declare_from_dict(&scope, "'a", Dict::new(Type::named("'a")));
-    let target_type = TypePointer::app(
-        know.client_pointer(),
-        TypePointer::ForAll(
-            false,
-            scope,
-            vec!["'a".to_string()],
-            Box::new(TypePointer::Qual(
-                vec![TypePointer::app(know.show_pointer(), var.clone())],
-                Box::new(var),
-            )),
-        ),
-    );
-
-    let integer = know.integer_pointer();
-    assert!(type_check_send(&mut know, &target_type, &integer));
-}
-
-#[test]
-fn test_type_check_generic_complex() {
-    let mut know = Knowledge::standard();
-    let scope = know.new_scope(&STDLIB);
-    let var = know.declare_from_dict(&scope, "'a", Dict::new(Type::named("'a")));
-    let target_type = TypePointer::app(
-        know.client_pointer(),
-        TypePointer::rec(vec![Prop::ano(TypePointer::ForAll(
-            false,
-            scope,
-            vec!["'a".to_string()],
-            Box::new(TypePointer::Qual(
-                vec![TypePointer::app(know.show_pointer(), var.clone())],
-                Box::new(var),
-            )),
-        ))]),
-    );
-
-    let integer = know.integer_pointer();
-    assert!(type_check_send(
-        &mut know,
-        &target_type,
-        &TypePointer::rec(vec![Prop::ano(integer)])
-    ));
 }
