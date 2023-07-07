@@ -217,8 +217,10 @@ impl NominalTyping {
 
 impl Types for NominalTyping {
     fn project(&self, target: &TypePointer) -> Type {
+        let target = self.follow_link(target);
+
         match target {
-            TypePointer::Ref(_) => Type::named(self.dict(target).name.as_str()),
+            TypePointer::Ref(_) => Type::named(self.dict(&target).name.as_str()),
 
             TypePointer::Rec(rec) => {
                 let mut props = Vec::new();
@@ -266,7 +268,7 @@ impl Types for NominalTyping {
                 let mut type_constraints = Vec::new();
 
                 for constraint in constraints {
-                    type_constraints.push(self.project(constraint));
+                    type_constraints.push(self.project(&constraint));
                 }
 
                 Type::Qual {
