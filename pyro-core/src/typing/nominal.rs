@@ -594,29 +594,15 @@ impl Machine for NominalTyping {
                 target,
                 mut suggested,
             } => {
-                let (final_target, target_dict) = {
-                    let symbols = self.scoped_symbols.get(&target.scope.id()).unwrap();
-
-                    if let Some(TypePointer::Ref(location)) =
-                        symbols.links.get(target.name.as_str())
-                    {
-                        (
-                            location.clone(),
-                            self.scoped_symbols
-                                .get(&location.scope.id())
-                                .unwrap()
-                                .inner
-                                .get(location.name.as_str())
-                                .cloned()
-                                .unwrap(),
-                        )
-                    } else {
-                        (
-                            target.clone(),
-                            symbols.inner.get(target.name.as_str()).cloned().unwrap(),
-                        )
-                    }
+                let final_target = if let TypePointer::Ref(t) =
+                    self.follow_link(&TypePointer::Ref(target.clone()))
+                {
+                    t
+                } else {
+                    return;
                 };
+
+                let target_dict = self.dict(&TypePointer::Ref(final_target.clone()));
 
                 // Suggestion are mainly derived from the AST so it's possible we still have to
                 // follow links.
