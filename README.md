@@ -1,20 +1,51 @@
-<div align="center">
+<h1 align="center">Pyro</h1>
+<p align="center">
+  <i>· π-calculus programming language ·</i>  
+</p>
 
-          ____                 
-         / __ \__  ___________ 
-        / /_/ / / / / ___/ __ \
-       / ____/ /_/ / /  / /_/ /
-      /_/    \__, /_/   \____/ 
-            /____/             
-     
-    · A π-calculus programming language and interpreter ·
-
-
-
-</div>
 <p align="center">
     <img src="https://github.com/YoEight/pyro/assets/144545/7cebd746-09de-495c-a381-6d20e1b5c4ae" />      
 </p>
+
+## Key features
+
+* Functional oriented (mutation is not allow for now)
+* Strong nominal type system with inference for non top-level declarations.
+* Type checking can be disabled, leading type errors or missing variables to raise exceptions at runtime.
+
+## Syntax
+
+Current `Pyro` syntax is very close to the Pict programming language however, this might change in mid-long term. A syntax closer to OCAML might be implemented in the future. See [Pict Tutorial] for exhaustive examples and more.
+
+## Example
+
+```
+run
+    (def for [min: Integer max: Integer f:![Integer ^[]] done: ^[]] =
+        (def loop x:Integer =
+            if (<= x max) then
+                (new c : ^[]
+                ( f ! [x c]
+                | c?[] = loop!(+ x 1)))
+            else
+                done ! []
+        loop ! min )
+    (new done : ^[]
+     ( for! [1 4
+            \[x c] = (print ! x | c ! [])
+            done]
+     | done?[] = print ! "Done!")))
+```
+
+When executed, that program should produce the following output:
+
+```
+1
+2
+3
+4
+"Done!"
+```
 
 ## Getting Started
 
@@ -41,7 +72,7 @@ The central idea is that these processes can not only send and receive informati
 
 ## Inspiration
 
-`Pyro` draws significant inspiration from the Pict programming language, one of the earliest implementations of the π-calculus theory in the form of a practical programming language. Current `Pyro` syntax is very close to Pict however, this might change in mid-long term. A mix of OCAML syntax could be implemented in the future. You can find more about the Pict programming language on the [Pict Homepage]. You can also find a [Pict presentation slides] and the [Pict tutorial] I used to implement `Pyro`.
+`Pyro` draws significant inspiration from the Pict programming language, one of the earliest implementations of the π-calculus theory in the form of a practical programming language. You can find more about the Pict programming language on the [Pict Homepage]. You can also find a [Pict presentation slides] and the [Pict tutorial] I used to implement `Pyro`.
 
 [Pict Homepage]: https://www.cis.upenn.edu/~bcpierce/papers/pict/Html/Pict.html
 [Pict presentation slides]: https://www-sop.inria.fr/mimosa/Pascal.Zimmer/mobility/pict.pdf
