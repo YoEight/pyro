@@ -1,5 +1,3 @@
-# Pyro
-
 <div align="center">
 
           ____                 
@@ -14,9 +12,9 @@
 
 
 </div>
-
-
-![demo](https://github.com/YoEight/pyro/assets/144545/7cebd746-09de-495c-a381-6d20e1b5c4ae)
+<p align="center">
+    <img src="https://github.com/YoEight/pyro/assets/144545/7cebd746-09de-495c-a381-6d20e1b5c4ae" />      
+</p>
 
 ## Getting Started
 
