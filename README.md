@@ -18,3 +18,11 @@ It's a mathematical framework used to describe and analyze the interactive behav
 In `Pyro`, computations are modeled as processes that communicate by passing messages through channels. The core features of `Pyro` are the ability to dynamically create new communication channels and to treat channels as first-class values that can be sent as part of messages. This allows `Pyro` to express dynamic network topologies, where the interconnections between components can change over time, which is a key aspect of distributed computing environments.
 
 The central idea is that these processes can not only send and receive information but also alter the network of communication. For instance, a process might create a new channel and send its name to other processes, which can then use this channel for future communication. This provides a powerful mechanism for expressing complex communication patterns.
+
+## Inspiration
+
+`Pyro` draws significant inspiration from the Pict programming language, one of the earliest implementations of the π-calculus theory in the form of a practical programming language. Current `Pyro` syntax is very close to Pict however, this might change in mid-long term. A mix of OCAML syntax could be implemented in the future. You can find more about the Pict programming language on the [Pict Homepage]. You can also find a [Pict presentation slides] and The [Pict tutorial] I used to implement `Pyro`.
+
+[Pict Homepage]: https://www.cis.upenn.edu/~bcpierce/papers/pict/Html/Pict.html
+[Pict presentation slides]: https://www-sop.inria.fr/mimosa/Pascal.Zimmer/mobility/pict.pdf
+[Pict tutorial]: https://www.cs.rpi.edu/academics/courses/spring04/dci/picttutorial.pdf
