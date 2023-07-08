@@ -2,8 +2,15 @@
 
 <div align="center">
 
+          ____                 
+         / __ \__  ___________ 
+        / /_/ / / / / ___/ __ \
+       / ____/ /_/ / /  / /_/ /
+      /_/    \__, /_/   \____/ 
+            /____/             
+     
+    · A π-calculus programming language and interpreter ·
 
-  A π-calculus programming language and interpreter
 
 
 </div>
