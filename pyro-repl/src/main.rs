@@ -23,7 +23,7 @@ enum Cmd {
     AddModule { file: PathBuf },
 
     /// Give the type of an expression.
-    Type { expr: String },
+    Type { expr: Vec<String> },
 
     /// Exit the application.
     Exit,
@@ -143,7 +143,8 @@ fn add_module<M: Machine>(engine: &mut Engine<M>, path: PathBuf) -> eyre::Result
     Ok(())
 }
 
-fn type_expr<M: Machine>(engine: &mut Engine<M>, expr: String) -> eyre::Result<()> {
+fn type_expr<M: Machine>(engine: &mut Engine<M>, expr: Vec<String>) -> eyre::Result<()> {
+    let expr = expr.join(" ");
     let tokens = Tokenizer::new(expr.as_str()).tokenize()?;
     let mut parser = ParserState::new(tokens.as_slice());
     let value = parser.parse_value()?;
