@@ -283,6 +283,47 @@ impl Types for NominalTyping {
         let require = self.follow_link(require);
         let provided = self.follow_link(provided);
 
+        if let TypePointer::ForAll(_, _, binders, body) = provided {
+            let mut local = self.clone();
+            local.apply(Event::PushScope);
+
+            for binder in binders {
+                local.apply(Event::TypeCreated(TypeCreated::Defined {
+                    name: binder.clone(),
+                    generic: true,
+                    constraints: vec![],
+                }));
+            }
+
+            if let TypePointer::Qual(ctx, body) = body.as_ref() {
+                for constraint in ctx {
+                    if let TypePointer::App(lhs, rhs) = constraint {
+                        // TODO - If we want Haskell-like higher kinded types, we need to make that
+                        // part more flexible. Right now we don't support universally quantified higher
+                        // kinded types.
+                        if let TypePointer::Ref(target) = rhs.as_ref() {
+                            let constraint = local.dict(lhs.as_ref());
+                            let dict = local
+                                .scoped_symbols
+                                .get_mut(&target.scope.id())
+                                .unwrap()
+                                .inner
+                                .get_mut(target.name.as_str())
+                                .unwrap();
+
+                            if dict.status == TypeStatus::Generic {
+                                dict.impls.insert(constraint.name);
+                            }
+                        }
+                    }
+                }
+
+                return local.type_check(&require, body.as_ref());
+            }
+
+            return local.type_check(&require, body.as_ref());
+        }
+
         match &require {
             TypePointer::Ref(_) => {
                 let require_dict = self.dict(&require);
@@ -362,8 +403,19 @@ impl Types for NominalTyping {
                 false
             }
 
-            TypePointer::Rec(require_rec) => {
-                if let TypePointer::Rec(provided_rec) = provided {
+            TypePointer::Rec(require_rec) => match provided {
+                _ if provided.is_type_ref() => {
+                    let require_dict = self.dict(&require);
+                    let provided_dict = self.dict(&provided);
+
+                    if !provided_dict.is_generic() {
+                        return false;
+                    }
+
+                    require_dict.impls.is_superset(&provided_dict.impls)
+                }
+
+                TypePointer::Rec(provided_rec) => {
                     if require_rec.props.len() != provided_rec.props.len() {
                         return false;
                     }
@@ -380,11 +432,11 @@ impl Types for NominalTyping {
                         }
                     }
 
-                    return true;
+                    true
                 }
 
-                false
-            }
+                _ => false,
+            },
         }
     }
 

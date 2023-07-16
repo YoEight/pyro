@@ -1,4 +1,7 @@
+mod compiler;
+
 use crate::ast::Prop;
+use crate::typing::tests::compiler::TestCompiler;
 use crate::{NominalTyping, TypePointer, TypeSystem};
 
 fn type_check_send(
@@ -76,4 +79,12 @@ fn test_type_check_generic_complex() {
         &target_type,
         &TypePointer::rec(vec![Prop::ano(integer)])
     ));
+}
+
+#[test]
+fn test_forall_inner_type_as_parameter() {
+    let mut compiler = TestCompiler::new();
+
+    compiler.load_module("def foobar [done: ![]] = ()").unwrap();
+    compiler.compile("run foobar ! [print]").unwrap();
 }
