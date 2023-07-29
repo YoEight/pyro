@@ -41,46 +41,35 @@ async fn main() -> eyre::Result<()> {
     let mut inputs = glyph::file_backed_inputs(options, ".pyro-repl")?;
     let mut engine = Engine::with_nominal_typing().stdlib(Env::stdio()).build()?;
 
-    while let Some(input) = inputs.next_input()? {
+    while let Some(input) = inputs.next_input_with_parser::<Shell>()? {
         match input {
             Input::Exit => {
                 break;
             }
 
-            Input::Command { name, params } => {
-                let mut cmd = vec![":".to_string(), name];
-                cmd.extend(params);
+            Input::Command(shell) => match shell.cmd {
+                Cmd::AddModule { file } => {
+                    let path = if let Some(user_dirs) = user_dirs.as_ref() {
+                        extrapolate_path(user_dirs, file)
+                    } else {
+                        PathBuf::from(file)
+                    };
 
-                match Shell::try_parse_from(&cmd) {
-                    Err(e) => {
-                        println!("{}", e);
+                    if let Err(e) = add_module(&mut engine, path) {
+                        println!("ERR: {}", e);
                     }
-
-                    Ok(shell) => match shell.cmd {
-                        Cmd::AddModule { file } => {
-                            let path = if let Some(user_dirs) = user_dirs.as_ref() {
-                                extrapolate_path(user_dirs, file)
-                            } else {
-                                PathBuf::from(file)
-                            };
-
-                            if let Err(e) = add_module(&mut engine, path) {
-                                println!("ERR: {}", e);
-                            }
-                        }
-
-                        Cmd::Type { expr } => {
-                            if let Err(e) = type_expr(&mut engine, expr) {
-                                println!("Err: {}", e);
-                            }
-                        }
-
-                        Cmd::Exit => {
-                            break;
-                        }
-                    },
                 }
-            }
+
+                Cmd::Type { expr } => {
+                    if let Err(e) = type_expr(&mut engine, expr) {
+                        println!("Err: {}", e);
+                    }
+                }
+
+                Cmd::Exit => {
+                    break;
+                }
+            },
 
             Input::String(s) => {
                 let source = format!("run {}", s);
