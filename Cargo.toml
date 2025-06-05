@@ -1,7 +1,3 @@
 [workspace]
-members = [
-    "pyro-core",
-    "pyro-runtime",
-    "pyro-repl",
-    "pyro",
-]
+resolver = "2"
+members = ["pyro-core", "pyro-runtime", "pyro-repl", "pyro"]

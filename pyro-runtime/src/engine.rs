@@ -385,11 +385,9 @@ impl PyroProcess {
                         proc_id_gen += 1;
 
                         tokio::spawn(async move {
-                            let local_runtime = s.runtime.clone();
                             match execute_proc(s.runtime, s.proc).await {
                                 Err(e) => {
-                                    local_runtime
-                                        .println(format!("UNEXPECTED RUNTIME ERROR: {}", e));
+                                    tracing::error!(error = %e, "unexpected runtime error");
                                 }
 
                                 Ok(jobs) => {
@@ -481,7 +479,7 @@ async fn execute_output(
     target: Tag<Val<Ann>, Ann>,
     param: Tag<Val<Ann>, Ann>,
 ) -> eyre::Result<Option<Suspend>> {
-    let target = if let Val::Path(path) = &target.item {
+    let output = if let Val::Path(path) = &target.item {
         let id = build_var_id(path.as_slice());
 
         match runtime.look_up(&id)? {
@@ -515,10 +513,16 @@ async fn execute_output(
             }
 
             _ => {
+                tracing::error!(
+                    "unexpected runtime exception: typemismatch, expected a client channel"
+                );
+
                 eyre::bail!("Unexpected runtime exception: typemismatch, expected a client channel")
             }
         }
     } else {
+        tracing::error!(item = %target.item, "unexpected value when looking for a channel's output");
+
         eyre::bail!(
             "Unexpected value '{}' when looking for a channel's output",
             target.item
@@ -526,7 +530,9 @@ async fn execute_output(
     };
 
     let value = interpret(runtime, param.item).await?;
-    let _ = target.send(value);
+    if output.send(value).is_err() {
+        tracing::debug!(item = %target.item, "output channel is closed");
+    }
 
     Ok(None)
 }
@@ -540,6 +546,8 @@ async fn execute_input(
         let id = build_var_id(path.as_slice());
         runtime.look_up(&id)?.server()?
     } else {
+        tracing::error!(item = %source.item, "unexpected value when looking for a channel's input");
+
         eyre::bail!(
             "Unexpected value '{}' when looking for a channel's input",
             source.item
@@ -555,6 +563,8 @@ async fn execute_input(
             proc: *abs.item.proc,
         }));
     }
+
+    tracing::debug!(item = %source.item, "receiver stopped waiting for input");
 
     Ok(None)
 }
@@ -642,6 +652,7 @@ async fn interpret(runtime: &mut Runtime, value: Val<Ann>) -> eyre::Result<Runti
                         continue;
                     }
 
+                    tracing::error!("unexpected runtime error when building record");
                     eyre::bail!("Unexpected runtime error when building record");
                 }
             },
@@ -681,6 +692,7 @@ async fn interpret(runtime: &mut Runtime, value: Val<Ann>) -> eyre::Result<Runti
         }
     }
 
+    tracing::error!("invalid stack error");
     eyre::bail!("Invalid stack error!")
 }
 
